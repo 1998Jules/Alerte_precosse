@@ -9,18 +9,293 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// Extension PostGIS pour les données géospatiales
+model PostgisExtension {
+  name          String @id
+  defaultVersion String @default("3.3")
+  installed      Boolean @default(false)
+}
+
+// Utilisateurs du système
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String?
+  role      UserRole @default(USER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  // Relations
+  alerts    Alert[]
+  posts     Post[]
 }
 
+// Rôles des utilisateurs
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+}
+
+// Alertes communales avec données géospatiales
+model Alert {
+  id          String     @id @default(cuid())
+  title       String
+  description String
+  type        AlertType
+  level       AlertLevel
+  location    String?
+  status      AlertStatus @default(ACTIVE)
+  authorId    String
+  
+  // Coordonnées géospatiales
+  latitude    Float?
+  longitude   Float?
+  geometry    String? // GeoJSON pour les zones d'alerte complexes
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  author      User       @relation(fields: [authorId], references: [id])
+  
+  @@map("alerts")
+}
+
+// Types d'alertes
+enum AlertType {
+  PRICE
+  DROUGHT
+  FLOOD
+  INFRASTRUCTURE
+  HEALTH
+  SECURITY
+  WEATHER
+}
+
+// Niveaux d'alertes
+enum AlertLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Statuts d'alertes
+enum AlertStatus {
+  ACTIVE
+  RESOLVED
+  ARCHIVED
+}
+
+// Prix du marché avec localisation
+model MarketPrice {
+  id          String   @id @default(cuid())
+  product     String
+  price       Float
+  unit        String
+  currency    String   @default("FCFA")
+  trend       String   // "+15%", "-5%", "0%"
+  market      String
+  category    String
+  availability String
+  quality     String
+  recordedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  
+  // Localisation du marché
+  latitude    Float?
+  longitude   Float?
+  
+  @@map("market_prices")
+}
+
+// Infrastructures avec données géospatiales
+model Infrastructure {
+  id              String              @id @default(cuid())
+  name            String
+  type            InfrastructureType
+  status          InfrastructureStatus
+  location        String
+  address         String?
+  capacity        String?
+  users           Int?
+  lastMaintenance DateTime?
+  nextMaintenance DateTime?
+  responsible     String
+  budget          String?
+  description     String
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les polygones complexes
+  images          Int                 @default(0)
+  documents       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  @@map("infrastructures")
+}
+
+// Types d'infrastructures
+enum InfrastructureType {
+  EDUCATION
+  HEALTH
+  WATER
+  ROAD
+  SPORTS
+  ADMIN
+  MARKET
+  ENERGY
+}
+
+// Statuts d'infrastructures
+enum InfrastructureStatus {
+  OPERATIONAL
+  MAINTENANCE
+  OUT_OF_SERVICE
+  PLANNED
+}
+
+// Cultures agricoles avec géolocalisation
+model Crop {
+  id              String     @id @default(cuid())
+  name            String
+  type            CropType
+  area            String
+  areaHa          Float
+  farmers         Int
+  currentSeason   String
+  expectedYield   String
+  status          CropStatus
+  healthStatus    HealthStatus
+  lastUpdate      DateTime   @default(now())
+  nextAction      String
+  irrigation      Boolean    @default(false)
+  fertilizer      String
+  challenges      String     // JSON array
+  opportunities   String     // JSON array
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les parcelles
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  @@map("crops")
+}
+
+// Types de cultures
+enum CropType {
+  CEREAL
+  TUBER
+  VEGETABLE
+  FRUIT
+  LEGUME
+}
+
+// Statuts de cultures
+enum CropStatus {
+  PLANTED
+  GROWING
+  HARVESTING
+  PREPARING
+}
+
+// États de santé des cultures
+enum HealthStatus {
+  GOOD
+  WARNING
+  CRITICAL
+}
+
+// Informations communales
+model CommunalInfo {
+  id          String           @id @default(cuid())
+  category    String
+  title       String
+  content     String
+  status      InfoStatus       @default(DRAFT)
+  priority    Priority         @default(MEDIUM)
+  author      String
+  views       Int              @default(0)
+  attachments Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  
+  @@map("communal_infos")
+}
+
+// Statuts des informations
+enum InfoStatus {
+  PUBLISHED
+  DRAFT
+  ARCHIVED
+}
+
+// Niveaux de priorité
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// Projets avec localisation
+model Project {
+  id              String         @id @default(cuid())
+  name            String
+  description     String
+  status          ProjectStatus  @default(PLANNING)
+  progress        Int            @default(0)
+  budget          String
+  startDate       DateTime?
+  completionDate  DateTime?
+  impact          String
+  manager         String
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les zones de projet
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  
+  @@map("projects")
+}
+
+// Statuts de projets
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+// Statistiques du tableau de bord
+model DashboardStats {
+  id                String   @id @default(cuid())
+  population        Int      @default(12450)
+  households        Int      @default(2100)
+  projects          Int      @default(24)
+  activeProjects    Int      @default(16)
+  completedProjects Int      @default(6)
+  infrastructures   Int      @default(47)
+  operationalInfra  Int      @default(43)
+  totalArea         String   @default("276")
+  density           String   @default("45")
+  lastUpdated       DateTime @default(now())
+  
+  // Limites géographiques de la commune
+  boundsNorth       Float?
+  boundsSouth       Float?
+  boundsEast        Float?
+  boundsWest        Float?
+  
+  @@map("dashboard_stats")
+}
+
+// Posts (modèle existant amélioré)
 model Post {
   id        String   @id @default(cuid())
   title     String
@@ -29,4 +304,237 @@ model Post {
   authorId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  // Relations
+  author    User     @relation(fields: [authorId], references: [id])
+  
+  @@map("posts")
+}
+
+// Zones géographiques pour le géoportail
+model GeoZone {
+  id          String   @id @default(cuid())
+  name        String
+  type        GeoZoneType
+  description String?
+  geometry    String   // GeoJSON
+  properties  String? // JSON pour les propriétés additionnelles
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("geo_zones")
+}
+
+// Types de zones géographiques
+enum GeoZoneType {
+  ADMINISTRATIVE
+  RISK_AREA
+  AGRICULTURAL
+  WATER_RESOURCE
+  NATURAL
+  URBAN
+}
+
+
+// Données météo agricoles
+model Weather {
+  id          String   @id @default(cuid())
+  temperature Float
+  humidity    Float
+  rainfall    Float
+  forecast    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("weather")
+}
+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ====================================
+// Tables existantes Django/PostGIS
+// ====================================
+
+// Cantons
+model Cantons {
+  gid        Int     @id
+  canton     String
+  code_canto Int
+  prefecture String
+  code_prefe Int
+  region     String
+  code_regio Int
+  geom       String  // MultiPolygon GeoJSON
+
+  @@map("cant_bli2")
+}
+
+// Communes
+model Commune {
+  commune    String
+  code_commu Int
+  region     String
+  code_regio Int
+  prefecture String
+  code_prefe Int
+  geom       String
+
+  @@map("bl2")
+}
+
+// Routes
+model Routes {
+  id         Int    @id @default(autoincrement())
+  route_type String
+  route_clas String
+  route_reco String
+  route_nom  String
+  geom       String
+
+  @@map("routeb2")
+}
+
+// Marchés
+model Marche {
+  canton_nom String
+  nom_locali String
+  marche_nom String
+  jour       String
+  geom       String
+
+  @@map("marches")
+}
+
+// Jardins d'enfants
+model Jardin {
+  canton_nom  String
+  nom_locali  String
+  etablissem  String
+  etab_adr    String
+  ouverture   String
+  etabliss_1  String
+  terrain     String
+  inspection  String
+  ministere   String
+  geom        String
+
+  @@map("jardb2")
+}
+
+// Collèges
+model College {
+  canton_nom  String
+  nom_locali  String
+  etablissem  String
+  etab_adr    String
+  ouverture   String
+  etabliss_1  String
+  terrain     String
+  inspection  String
+  ministere   String
+  geom        String
+
+  @@map("collegeb2")
+}
+
+// Lycées
+model Lycee {
+  canton_nom  String
+  nom_locali  String
+  etablissem  String
+  etab_adr    String
+  ouverture   String
+  etabliss_1  String
+  terrain     String
+  inspection  String
+  ministere   String
+  geom        String
+
+  @@map("lyc2")
+}
+
+// PEA
+model Pea {
+  canton_nom   String
+  nom_locali   String
+  forage_nom   String
+  forage_typ   String
+  batiment_n   String
+  geom         String
+
+  @@map("pea")
+}
+
+// Borne fontaines
+model BorneFontaine {
+  canton_nom String
+  borne_font String
+  geom       String
+
+  @@map("bornefontaines")
+}
+
+// Châteaux
+model Chateau {
+  canton_nom String
+  nom_locali String
+  chateau_no String
+  organisme  String
+  geom       String
+
+  @@map("chatea")
+}
+
+// Hôpitaux / Formations sanitaires
+model Hopitale {
+  canton_nom String
+  nom_locali String
+  nom_fs     String
+  ouverture  String
+  secteur    String
+  services_p String
+  geom       String
+
+  @@map("formation_s")
+}
+
+// Terrains / stades
+model Terrain {
+  canton_nom String
+  nom_locali String
+  terrain    String
+  terrain_sp String
+  geom       String
+
+  @@map("stade_terrainbl2")
+}
+
+// Coopératives
+model Cooperative {
+  canton_nom  String
+  nom_locali  String
+  cooperativ  String
+  cooperat_1  String
+  geom        String
+
+  @@map("cooperativebl2")
+}
+
+// Magasins / intrants
+model MagasinBl2 {
+  canton_nom String
+  etab_nom   String
+  ouverture  String
+  organisme  String
+  geom       String
+
+  @@map("magazin_intrantbl2")
 }

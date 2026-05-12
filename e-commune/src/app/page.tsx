@@ -403,13 +403,15 @@ export default function CommuneApp() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
                     <GeoportalMap 
-                      center={{ lat: 8.8667, lng: 0.7833 }}
-                      zoom={12}
-                      className="h-96 lg:h-[500px]"
-                      onFeatureClick={(feature) => {
-                        console.log('Feature clicked:', feature)
-                      }}
-                    />
+  key={activeSection}
+  center={{ lat: 18.8667, lng: 2.7833 }}
+  zoom={12}
+  className="h-96 lg:h-[500px]"
+  onFeatureClick={(feature) => {
+    console.log('Feature clicked:', feature)
+  }}
+/>
+
                     
                     <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">

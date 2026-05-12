@@ -1,0 +1,336 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Extension PostGIS pour les données géospatiales
+model PostgisExtension {
+  name          String @id
+  defaultVersion String @default("3.3")
+  installed      Boolean @default(false)
+}
+
+// Utilisateurs du système
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  alerts    Alert[]
+  posts     Post[]
+}
+
+// Rôles des utilisateurs
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+}
+
+// Alertes communales avec données géospatiales
+model Alert {
+  id          String     @id @default(cuid())
+  title       String
+  description String
+  type        AlertType
+  level       AlertLevel
+  location    String?
+  status      AlertStatus @default(ACTIVE)
+  authorId    String
+  
+  // Coordonnées géospatiales
+  latitude    Float?
+  longitude   Float?
+  geometry    String? // GeoJSON pour les zones d'alerte complexes
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  author      User       @relation(fields: [authorId], references: [id])
+  
+  @@map("alerts")
+}
+
+// Types d'alertes
+enum AlertType {
+  PRICE
+  DROUGHT
+  FLOOD
+  INFRASTRUCTURE
+  HEALTH
+  SECURITY
+  WEATHER
+}
+
+// Niveaux d'alertes
+enum AlertLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Statuts d'alertes
+enum AlertStatus {
+  ACTIVE
+  RESOLVED
+  ARCHIVED
+}
+
+// Prix du marché avec localisation
+model MarketPrice {
+  id          String   @id @default(cuid())
+  product     String
+  price       Float
+  unit        String
+  currency    String   @default("FCFA")
+  trend       String   // "+15%", "-5%", "0%"
+  market      String
+  category    String
+  availability String
+  quality     String
+  recordedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  
+  // Localisation du marché
+  latitude    Float?
+  longitude   Float?
+  
+  @@map("market_prices")
+}
+
+// Infrastructures avec données géospatiales
+model Infrastructure {
+  id              String              @id @default(cuid())
+  name            String
+  type            InfrastructureType
+  status          InfrastructureStatus
+  location        String
+  address         String?
+  capacity        String?
+  users           Int?
+  lastMaintenance DateTime?
+  nextMaintenance DateTime?
+  responsible     String
+  budget          String?
+  description     String
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les polygones complexes
+  images          Int                 @default(0)
+  documents       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  @@map("infrastructures")
+}
+
+// Types d'infrastructures
+enum InfrastructureType {
+  EDUCATION
+  HEALTH
+  WATER
+  ROAD
+  SPORTS
+  ADMIN
+  MARKET
+  ENERGY
+}
+
+// Statuts d'infrastructures
+enum InfrastructureStatus {
+  OPERATIONAL
+  MAINTENANCE
+  OUT_OF_SERVICE
+  PLANNED
+}
+
+// Cultures agricoles avec géolocalisation
+model Crop {
+  id              String     @id @default(cuid())
+  name            String
+  type            CropType
+  area            String
+  areaHa          Float
+  farmers         Int
+  currentSeason   String
+  expectedYield   String
+  status          CropStatus
+  healthStatus    HealthStatus
+  lastUpdate      DateTime   @default(now())
+  nextAction      String
+  irrigation      Boolean    @default(false)
+  fertilizer      String
+  challenges      String     // JSON array
+  opportunities   String     // JSON array
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les parcelles
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  @@map("crops")
+}
+
+// Types de cultures
+enum CropType {
+  CEREAL
+  TUBER
+  VEGETABLE
+  FRUIT
+  LEGUME
+}
+
+// Statuts de cultures
+enum CropStatus {
+  PLANTED
+  GROWING
+  HARVESTING
+  PREPARING
+}
+
+// États de santé des cultures
+enum HealthStatus {
+  GOOD
+  WARNING
+  CRITICAL
+}
+
+// Informations communales
+model CommunalInfo {
+  id          String           @id @default(cuid())
+  category    String
+  title       String
+  content     String
+  status      InfoStatus       @default(DRAFT)
+  priority    Priority         @default(MEDIUM)
+  author      String
+  views       Int              @default(0)
+  attachments Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  
+  @@map("communal_infos")
+}
+
+// Statuts des informations
+enum InfoStatus {
+  PUBLISHED
+  DRAFT
+  ARCHIVED
+}
+
+// Niveaux de priorité
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// Projets avec localisation
+model Project {
+  id              String         @id @default(cuid())
+  name            String
+  description     String
+  status          ProjectStatus  @default(PLANNING)
+  progress        Int            @default(0)
+  budget          String
+  startDate       DateTime?
+  completionDate  DateTime?
+  impact          String
+  manager         String
+  latitude        Float?
+  longitude       Float?
+  geometry        String? // GeoJSON pour les zones de projet
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  
+  @@map("projects")
+}
+
+// Statuts de projets
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+// Statistiques du tableau de bord
+model DashboardStats {
+  id                String   @id @default(cuid())
+  population        Int      @default(12450)
+  households        Int      @default(2100)
+  projects          Int      @default(24)
+  activeProjects    Int      @default(16)
+  completedProjects Int      @default(6)
+  infrastructures   Int      @default(47)
+  operationalInfra  Int      @default(43)
+  totalArea         String   @default("276")
+  density           String   @default("45")
+  lastUpdated       DateTime @default(now())
+  
+  // Limites géographiques de la commune
+  boundsNorth       Float?
+  boundsSouth       Float?
+  boundsEast        Float?
+  boundsWest        Float?
+  
+  @@map("dashboard_stats")
+}
+
+// Posts (modèle existant amélioré)
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  author    User     @relation(fields: [authorId], references: [id])
+  
+  @@map("posts")
+}
+
+// Zones géographiques pour le géoportail
+model GeoZone {
+  id          String   @id @default(cuid())
+  name        String
+  type        GeoZoneType
+  description String?
+  geometry    String   // GeoJSON
+  properties  String? // JSON pour les propriétés additionnelles
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("geo_zones")
+}
+
+// Types de zones géographiques
+enum GeoZoneType {
+  ADMINISTRATIVE
+  RISK_AREA
+  AGRICULTURAL
+  WATER_RESOURCE
+  NATURAL
+  URBAN
+}

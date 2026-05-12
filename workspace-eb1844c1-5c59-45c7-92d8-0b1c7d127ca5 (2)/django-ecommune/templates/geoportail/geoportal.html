@@ -1,0 +1,341 @@
+{% extends 'base.html' %}
+
+{% block title %}Géoportail - {{ commune_info.name }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-map me-2"></i>
+                    Géoportail de {{ commune_info.name }}
+                </h5>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnFullscreen">
+                        <i class="bi bi-fullscreen"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnResetView">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <!-- Contrôles des couches -->
+                <div class="row bg-light p-3 border-bottom">
+                    <div class="col-md-8">
+                        <h6 class="mb-3">Couches thématiques</h6>
+                        <div class="row" id="layersContainer">
+                            <!-- Les couches seront chargées dynamiquement -->
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="mb-3">Fond de carte</h6>
+                        <select class="form-select form-select-sm" id="basemapSelect">
+                            <option value="osm">OpenStreetMap</option>
+                            <option value="satellite">Satellite</option>
+                            <option value="terrain">Topographique</option>
+                            <option value="dark">Sombre</option>
+                            <option value="watercolor">Aquarelle</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Carte -->
+                <div id="geoportal-map"></div>
+                
+                <!-- Informations -->
+                <div class="row bg-light p-3 border-top">
+                    <div class="col-md-6">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i>
+                            Centre: {{ commune_info.center_latitude|floatformat:4 }}, {{ commune_info.center_longitude|floatformat:4 }} | 
+                            Zoom: <span id="currentZoom">{{ commune_info.default_zoom }}</span> | 
+                            Couches: <span id="layerCount">0</span>
+                        </small>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <small class="text-muted">
+                            <span id="loadingStatus" class="badge bg-warning">Chargement...</span>
+                            <span id="layerStats" class="ms-2"></span>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour les détails d'entité -->
+<div class="modal fade" id="featureModal" tabindex="-1" aria-labelledby="featureModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="featureModalLabel">Détails</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="featureDetails">
+                    <!-- Les détails seront chargés dynamiquement -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Configuration du géoportail
+const GEOCONFIG = {
+    center: [{{ commune_info.center_latitude }}, {{ commune_info.center_longitude }}],
+    zoom: {{ commune_info.default_zoom }},
+    basemaps: {
+        osm: {
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        },
+        satellite: {
+            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attribution: '&copy; <a href="https://www.esri.com/">Esri</a>'
+        },
+        terrain: {
+            url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a> contributors'
+        },
+        dark: {
+            url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+            attribution: '&copy; <a href="https://www.carto.com/">CARTO</a>'
+        },
+        watercolor: {
+            url: 'https://stamen-tiles-{s}.a.ssl.fastly.net/watercolor/{z}/{x}/{y}.jpg',
+            attribution: '&copy; <a href="https://stamen.com">Stamen Design</a>'
+        }
+    },
+    layerColors: {
+        cantons: '#FF6B6B',
+        communes: '#4ECDC4',
+        routes: '#45B7D1',
+        hopitaux: '#DC143C',
+        jardins: '#96CEB4',
+        colleges: '#87CEEB',
+        lycees: '#4682B4',
+        peas: '#0077BE',
+        bornes: '#20B2AA',
+        marches: '#FFA07A',
+        cooperatives: '#FF8C00',
+        magasins: '#9370DB',
+        chateaux: '#DDA0DD',
+        terrains: '#228B22'
+    }
+};
+
+let map;
+let layers = {};
+let layerControls = {};
+
+// Initialiser la carte
+function initMap() {
+    map = L.map('geoportal-map').setView(GEOCONFIG.center, GEOCONFIG.zoom);
+    
+    // Ajouter le fond de carte par défaut
+    L.tileLayer(GEOCONFIG.basemaps.osm.url, {
+        attribution: GEOCONFIG.basemaps.osm.attribution
+    }).addTo(map);
+    
+    // Charger les couches
+    loadLayers();
+    
+    // Écouter les changements de zoom
+    map.on('zoomend', function() {
+        document.getElementById('currentZoom').textContent = map.getZoom();
+    });
+}
+
+// Charger les couches depuis l'API
+function loadLayers() {
+    const loadingStatus = document.getElementById('loadingStatus');
+    loadingStatus.textContent = 'Chargement des couches...';
+    loadingStatus.className = 'badge bg-warning';
+    
+    fetch('/geoportail/api/layers/')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                layers = data.layers;
+                renderLayerControls();
+                updateLayerStats();
+                
+                loadingStatus.textContent = `${Object.keys(layers).length} couches chargées`;
+                loadingStatus.className = 'badge bg-success';
+            } else {
+                throw new Error(data.error || 'Erreur lors du chargement');
+            }
+        })
+        .catch(error => {
+            console.error('Erreur de chargement:', error);
+            loadingStatus.textContent = 'Erreur de chargement';
+            loadingStatus.className = 'badge bg-danger';
+        });
+}
+
+// Afficher les contrôles des couches
+function renderLayerControls() {
+    const container = document.getElementById('layersContainer');
+    container.innerHTML = '';
+    
+    Object.entries(layers).forEach(([layerId, layerData]) => {
+        const layerDiv = document.createElement('div');
+        layerDiv.className = 'col-md-4 mb-2';
+        
+        const checkbox = document.createElement('div');
+        checkbox.className = 'form-check';
+        checkbox.innerHTML = `
+            <input class="form-check-input" type="checkbox" id="layer-${layerId}" 
+                   data-layer="${layerId}" ${layerData.visible ? 'checked' : ''}>
+            <label class="form-check-label" for="layer-${layerId}" style="color: ${layerData.color}">
+                ${layerData.name}
+            </label>
+        `;
+        
+        layerDiv.appendChild(checkbox);
+        container.appendChild(layerDiv);
+        
+        // Ajouter le gestionnaire d'événements
+        const input = checkbox.querySelector('input');
+        input.addEventListener('change', function() {
+            toggleLayer(layerId, this.checked);
+        });
+        
+        // Stocker la référence
+        layerControls[layerId] = {
+            input: input,
+            label: checkbox.querySelector('label'),
+            layer: null
+        };
+    });
+}
+
+// Basculer une couche
+function toggleLayer(layerId, visible) {
+    const layerData = layers[layerId];
+    
+    if (visible && !layerControls[layerId].layer) {
+        // Ajouter la couche à la carte
+        const geoJsonLayer = L.geoJSON(layerData.data, {
+            style: function(feature) {
+                return {
+                    color: layerData.color,
+                    weight: 2,
+                    fillOpacity: layerData.opacity || 0.7,
+                    fillColor: layerData.color
+                };
+            },
+            onEachFeature: function(feature, layer) {
+                // Ajouter un popup
+                if (feature.properties) {
+                    const popupContent = Object.entries(feature.properties)
+                        .map(([key, value]) => `<strong>${key}:</strong> ${value}`)
+                        .join('<br>');
+                    layer.bindPopup(popupContent);
+                }
+            }
+        }).addTo(map);
+        
+        layerControls[layerId].layer = geoJsonLayer;
+    } else if (!visible && layerControls[layerId].layer) {
+        // Retirer la couche de la carte
+        map.removeLayer(layerControls[layerId].layer);
+        layerControls[layerId].layer = null;
+    }
+    
+    updateLayerStats();
+}
+
+// Mettre à jour les statistiques
+function updateLayerStats() {
+    const visibleCount = Object.values(layerControls).filter(control => control.layer).length;
+    const totalCount = Object.keys(layers).length;
+    
+    document.getElementById('layerCount').textContent = `${visibleCount}/${totalCount}`;
+    document.getElementById('layerStats').textContent = `${visibleCount} couche(s) visible(s)`;
+}
+
+// Changer de fond de carte
+document.getElementById('basemapSelect').addEventListener('change', function() {
+    const basemapName = this.value;
+    const basemap = GEOCONFIG.basemaps[basemapName];
+    
+    if (basemap) {
+        // Retirer les couches de tuiles existantes
+        map.eachLayer(function(layer) {
+            if (layer instanceof L.TileLayer) {
+                map.removeLayer(layer);
+            }
+        });
+        
+        // Ajouter le nouveau fond de carte
+        L.tileLayer(basemap.url, {
+            attribution: basemap.attribution
+        }).addTo(map);
+    }
+});
+
+// Plein écran
+document.getElementById('btnFullscreen').addEventListener('click', function() {
+    const mapContainer = document.getElementById('geoportal-map');
+    
+    if (!document.fullscreenElement) {
+        mapContainer.requestFullscreen().catch(err => {
+            console.log(`Erreur plein écran: ${err.message}`);
+        });
+    } else {
+        document.exitFullscreen();
+    }
+});
+
+// Réinitialiser la vue
+document.getElementById('btnResetView').addEventListener('click', function() {
+    map.setView(GEOCONFIG.center, GEOCONFIG.zoom);
+});
+
+// Initialiser quand la page est chargée
+document.addEventListener('DOMContentLoaded', function() {
+    initMap();
+});
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+#geoportal-map {
+    height: 600px;
+    border-radius: 0 0 0.375rem 0.375rem;
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.layer-control {
+    transition: all 0.3s ease;
+}
+
+.layer-control:hover {
+    transform: translateX(3px);
+}
+
+.modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.leaflet-popup-content {
+    font-size: 0.875rem;
+}
+</style>
+{% endblock %}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // Mock data - dans une vraie application, cela viendrait d'un SIG ou d'une base de données géospatiales
 const geoportalData = {
-  mapCenter: { lat: 8.8667, lng: 0.7833 }, // Coordonnées approximatives de Blitta
+  mapCenter: { lat: 77.8667, lng: 77.7833 }, // Coordonnées approximatives de Blitta
   zoom: 12,
   layers: {
     administrative: {

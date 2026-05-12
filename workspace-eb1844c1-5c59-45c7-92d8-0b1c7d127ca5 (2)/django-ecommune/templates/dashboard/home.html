@@ -1,0 +1,273 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<!-- Statistiques -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card bg-primary text-white">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h5 class="card-title text-uppercase text-white-50 mb-0">Population</h5>
+                        <h2 class="h1 mb-0 text-white">{{ stats.population|default_if_none:"12,450"|numberformat }}</h2>
+                        <p class="text-white-50">{{ stats.households|default_if_none:"2,100"|numberformat }} ménages</p>
+                    </div>
+                    <div class="col-auto">
+                        <i class="bi bi-people-fill display-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card bg-success text-white">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h5 class="card-title text-uppercase text-white-50 mb-0">Projets</h5>
+                        <h2 class="h1 mb-0 text-white">{{ stats.projects|default_if_none:"24" }}</h2>
+                        <p class="text-white-50">{{ stats.active_projects|default_if_none:"16" }} actifs</p>
+                    </div>
+                    <div class="col-auto">
+                        <i class="bi bi-clipboard-data-fill display-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card bg-warning text-white">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h5 class="card-title text-uppercase text-white-50 mb-0">Alertes</h5>
+                        <h2 class="h1 mb-0 text-white">{{ recent_alerts|length }}</h2>
+                        <p class="text-white-50">{{ recent_alerts|length|default_if_none:"0" }} critiques</p>
+                    </div>
+                    <div class="col-auto">
+                        <i class="bi bi-exclamation-triangle-fill display-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card bg-info text-white">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <h5 class="card-title text-uppercase text-white-50 mb-0">Infrastructures</h5>
+                        <h2 class="h1 mb-0 text-white">{{ stats.infrastructures|default_if_none:"47" }}</h2>
+                        <p class="text-white-50">{{ stats.operational_infra|default_if_none:"43" }} opérationnelles</p>
+                    </div>
+                    <div class="col-auto">
+                        <i class="bi bi-building-fill display-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alertes récentes et Projets -->
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Alertes récentes</h5>
+                <a href="{% url 'alerts:list' %}" class="btn btn-sm btn-outline-primary">Voir tout</a>
+            </div>
+            <div class="card-body">
+                {% if recent_alerts %}
+                    {% for alert in recent_alerts %}
+                    <div class="alert-card alert-{{ alert.level }} p-3 mb-3">
+                        <div class="d-flex align-items-start">
+                            <div class="flex-shrink-0">
+                                {% if alert.level == 'critical' %}
+                                    <i class="bi bi-exclamation-circle-fill text-danger"></i>
+                                {% elif alert.level == 'high' %}
+                                    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+                                {% elif alert.level == 'medium' %}
+                                    <i class="bi bi-info-circle-fill text-info"></i>
+                                {% else %}
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                {% endif %}
+                            </div>
+                            <div class="ms-3 flex-grow-1">
+                                <h6 class="mb-1">{{ alert.title }}</h6>
+                                <p class="mb-1 text-muted">{{ alert.description|truncatewords:20 }}</p>
+                                <small class="text-muted">
+                                    <i class="bi bi-geo-alt"></i> {{ alert.location|default:"Non spécifiée" }} • 
+                                    <i class="bi bi-clock"></i> {{ alert.created_at|date:"d/m/Y H:i" }}
+                                </small>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <span class="badge bg-{{ alert.level }} text-white">{{ alert.get_level_display }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-check-circle-fill text-success display-1"></i>
+                        <p class="mt-2 text-muted">Aucune alerte active</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Projets récents</h5>
+                <a href="#" class="btn btn-sm btn-outline-primary">Voir tout</a>
+            </div>
+            <div class="card-body">
+                {% if recent_projects %}
+                    {% for project in recent_projects %}
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="flex-shrink-0">
+                            <div class="rounded-circle bg-{{ project.status }} p-2">
+                                <i class="bi bi-clipboard-data text-white"></i>
+                            </div>
+                        </div>
+                        <div class="ms-3 flex-grow-1">
+                            <h6 class="mb-1">{{ project.title|truncatechars:30 }}</h6>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar bg-{{ project.status }}" 
+                                     style="width: {{ project.progress }}%"
+                                     role="progressbar">
+                                </div>
+                            </div>
+                            <small class="text-muted">{{ project.progress }}% • {{ project.get_status_display }}</small>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-clipboard-data text-muted display-1"></i>
+                        <p class="mt-2 text-muted">Aucun projet en cours</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Prix du marché -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Prix du marché</h5>
+                <a href="{% url 'market:list' %}" class="btn btn-sm btn-outline-primary">Voir tout</a>
+            </div>
+            <div class="card-body">
+                {% if recent_prices %}
+                    <div class="row">
+                        {% for price in recent_prices %}
+                        <div class="col-md-3 mb-3">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h6 class="card-title">{{ price.product }}</h6>
+                                    <p class="card-text">
+                                        <span class="h4 text-primary">{{ price.price }} {{ price.currency }}</span>
+                                        <small class="text-muted">/ {{ price.unit }}</small>
+                                    </p>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <small class="text-muted">{{ price.market }}</small>
+                                        <span class="badge {% if price.trend.startswith('+') %}bg-danger{% elif price.trend.startswith('-') %}bg-success{% else %}bg-secondary{% endfor %}">
+                                            {{ price.trend }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-cart3 text-muted display-1"></i>
+                        <p class="mt-2 text-muted">Aucun prix enregistré</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-rafraîchissement des statistiques
+function refreshStats() {
+    fetch('/dashboard/api/stats/')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Statistiques rafraîchies');
+            }
+        })
+        .catch(error => console.error('Erreur:', error));
+}
+
+// Rafraîchir toutes les 30 secondes
+setInterval(refreshStats, 30000);
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.alert-critical {
+    background-color: #fff5f5;
+}
+
+.alert-high {
+    background-color: #fff3cd;
+}
+
+.alert-medium {
+    background-color: #d1ecf1;
+}
+
+.alert-low {
+    background-color: #d4edda;
+}
+
+.bg-critical {
+    background-color: #dc3545 !important;
+}
+
+.bg-high {
+    background-color: #ffc107 !important;
+}
+
+.bg-medium {
+    background-color: #17a2b8 !important;
+}
+
+.bg-low {
+    background-color: #28a745 !important;
+}
+
+.bg-planned {
+    background-color: #6c757d !important;
+}
+
+.bg-in_progress {
+    background-color: #007bff !important;
+}
+
+.bg-completed {
+    background-color: #28a745 !important;
+}
+
+.bg-suspended {
+    background-color: #dc3545 !important;
+}
+</style>
+{% endblock %}
