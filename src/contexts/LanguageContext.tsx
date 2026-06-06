@@ -77,7 +77,19 @@ export const LanguageProvider = ({ children }: LanguageProviderProps) => {
         'market.prices': 'Prix du marché',
         'button.search': 'Rechercher',
         'button.filter': 'Filtrer',
-        'no.results': 'Aucun résultat trouvé'
+        'no.results': 'Aucun résultat trouvé',
+        'menu.cartotheque': 'Cartothèque',
+'cartotheque.title': 'Cartothèque',
+'cartotheque.subtitle': 'Découvrez et explorez les cartes thématiques de la commune',
+'cartotheque.publish': 'Publier une carte',
+'cartotheque.search': 'Rechercher une carte...',
+'cartotheque.all': 'Tous',
+'cartotheque.published': 'cartes publiées',
+'cartotheque.domains': 'domaines',
+'cartotheque.no_results': 'Aucune carte trouvée',
+'cartotheque.empty': "La cartothèque est vide. Publiez votre première carte !",
+'cartotheque.loading': 'Chargement des cartes...',
+'cartotheque.view_map': 'Voir la carte',
       },
       kab: {
         'dashboard.title': 'Cɔnaʊ nɛ lɔŋ kpaʊ taba ',
@@ -93,7 +105,9 @@ export const LanguageProvider = ({ children }: LanguageProviderProps) => {
         'alert.report': 'Ɖeɖee nɛ ɖe sɔɔlɔtɔɔ',
         'search.placeholder': 'Ɖeɖee nɛ...',
         'chatbot.title': 'Wɔlɔɔ',
-        'chatbot.welcome': 'M̀ ba tɔɔ! Ḿ nɛ wɔlɔɔ ɖe sɔɔlɔtɔɔ nɛ. M̀ ba taa nɛ ɖoɖo?'
+        'chatbot.welcome': 'M̀ ba tɔɔ! Ḿ nɛ wɔlɔɔ ɖe sɔɔlɔtɔɔ nɛ. M̀ ba taa nɛ ɖoɖo?',
+        'menu.cartotheque': 'Kaatɩ tɔm kɛdɛŋ',
+'cartotheque.title': 'Kaatɩ tɔm kɛdɛŋ',
       },
       ewe: {
         'dashboard.title': 'Dɔwɔƒe ƒe Agbalẽ',
@@ -109,7 +123,9 @@ export const LanguageProvider = ({ children }: LanguageProviderProps) => {
         'alert.report': 'Ɖe agbagbaɖoɖo ɖe edzi',
         'search.placeholder': 'Dii eme...',
         'chatbot.title': 'Kpekpeɖeŋula',
-        'chatbot.welcome': 'Woé zɔ! Nyè nye wò agbagbaɖoɖo ƒe kpekpeɖeŋula. Aleke mate ŋu akpe ɖe wò ŋu?'
+        'chatbot.welcome': 'Woé zɔ! Nyè nye wò agbagbaɖoɖo ƒe kpekpeɖeŋula. Aleke mate ŋu akpe ɖe wò ŋu?',
+        'menu.cartotheque': 'Nunana ƒe Agbalẽ',
+'cartotheque.title': 'Nunana ƒe Agbalẽ',
       }
 
       

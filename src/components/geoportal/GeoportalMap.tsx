@@ -219,10 +219,10 @@ export default function GeoPortalMap({
     // 🔴⚫ Piste rurale → rouge/noir ligne fine
     if (routeType === 'Piste rurale') {
       return {
-        color: '#3d2525',
+        color: '#ece9e9',
         weight: 2,
         opacity: 1,
-        dashArray: '6,4'
+       
       };
     }
 
