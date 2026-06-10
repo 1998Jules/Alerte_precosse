@@ -1,7 +1,8 @@
-'use client'
+ 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertTriangle, TrendingUp, Map, Building, Droplets, ThermometerSun, Waves, Home as HomeIcon, Users, Activity, Zap, TreePine, Trophy, Bell, Menu, X, Search, Filter, ChevronRight, MapPin, AlertCircle, CheckCircle, Settings } from 'lucide-react'
+import { AlertTriangle, TrendingUp, Map, Building, Droplets, ThermometerSun, Waves, Home as HomeIcon, Users, Activity, Zap, TreePine, Trophy, Bell, Menu, X, Search, Filter, ChevronRight, MapPin, AlertCircle, CheckCircle, Settings,BookOpen} from 'lucide-react'
+
 import GeoPortal from '@/components/geoportal/GeoPortal'
 import CommunalManagement from '@/components/communal/CommunalManagement'
 import InfrastructureManagement from '@/components/infrastructure/InfrastructureManagement'
@@ -10,6 +11,7 @@ import AdminPanel from '@/components/admin/AdminPanel'
 import LanguageSelector from '@/components/LanguageSelector'
 import Chatbot from '@/components/Chatbot'
 import { useLanguage } from '@/app/contexts/LanguageContext'
+import Cartotheque from '@/components/cartotheque/Cartotheque'
 
 export default function CommuneApp() {
   const { t, language } = useLanguage()
@@ -90,6 +92,7 @@ export default function CommuneApp() {
     { id: 'dashboard', label: t('menu.dashboard'), icon: HomeIcon },
     { id: 'alerts', label: t('menu.alerts'), icon: Bell },
     { id: 'geoportal', label: t('menu.geoportal'), icon: Map },
+    { id: 'cartotheque', label: t('menu.cartotheque'), icon: BookOpen },
     { id: 'infrastructures', label: t('menu.infrastructures'), icon: Building },
     { id: 'agriculture', label: t('menu.agriculture'), icon: TreePine },
     { id: 'water', label: t('menu.water'), icon: Droplets },
@@ -496,6 +499,7 @@ export default function CommuneApp() {
 
           {/* Geoportal Section */}
           {activeSection === 'geoportal' && <GeoPortal />}
+          {activeSection === 'cartotheque' && <Cartotheque language={language} />}  
         </main>
       </div>
 
