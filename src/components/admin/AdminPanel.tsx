@@ -1,7 +1,42 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertTriangle, TrendingUp, Users, Building, TreePine, Droplets, Plus, Edit, Trash2, Save, X, Eye, BarChart3, Settings, Database, RefreshCw, Cloud, Thermometer } from 'lucide-react'
+import { AlertTriangle, TrendingUp, Users, Building, TreePine, Droplets, Plus, Edit, Trash2, Save, X, Eye, BarChart3, Settings, Database, RefreshCw, Cloud, Thermometer, Map, Lock, Unlock, Upload, Layers, Link, Ruler, Printer, Loader2 } from 'lucide-react'
+
+interface CarteTheematique {
+  id: number
+  titre: string
+  description: string
+  domaine: number | null
+  domaine_nom: string | null
+  domaine_couleur: string | null
+  vignette_url: string | null
+  image_url: string | null
+  type_carte: string
+  statut: string
+  auteur: string
+  source: string
+  mots_cles: string
+  date_creation: string
+  date_modification: string
+  echelle: string | null
+  format_impression: string | null
+  date_edition: string | null
+  realisateur: string | null
+  is_payant: boolean
+  prix: number | null
+  prix_formate: string | null
+  couches_associees: string[]
+}
+
+interface CartoDomaine {
+  id: number
+  nom: string
+  slug: string
+  icone: string
+  couleur: string
+  nombre_cartes: number
+}
 
 interface AdminData {
   alerts: any[]
@@ -12,6 +47,8 @@ interface AdminData {
   projects: any[]
   dashboardStats: any
   weatherData: any
+  cartes: CarteTheematique[]
+  cartoDomaines: CartoDomaine[]
 }
 
 export default function AdminPanel() {
@@ -24,7 +61,9 @@ export default function AdminPanel() {
     communalInfos: [],
     projects: [],
     dashboardStats: null,
-    weatherData: null
+    weatherData: null,
+    cartes: [],
+    cartoDomaines: []
   })
   const [loading, setLoading] = useState(true)
   const [editingItem, setEditingItem] = useState<any>(null)
@@ -38,7 +77,8 @@ export default function AdminPanel() {
     { id: 'crops', label: 'Agriculture', icon: TreePine },
     { id: 'water', label: 'Eau', icon: Droplets },
     { id: 'infos', label: 'Infos communales', icon: Users },
-    { id: 'projects', label: 'Projets', icon: Settings }
+    { id: 'projects', label: 'Projets', icon: Settings },
+    { id: 'cartotheque', label: 'Cartothèque', icon: Map }
   ]
 
   useEffect(() => {
@@ -48,7 +88,7 @@ export default function AdminPanel() {
   const fetchAllData = async () => {
     setLoading(true)
     try {
-      const [alertsRes, marketRes, infraRes, cropsRes, infosRes, projectsRes, statsRes, weatherRes] = await Promise.all([
+      const [alertsRes, marketRes, infraRes, cropsRes, infosRes, projectsRes, statsRes, weatherRes, cartesRes, domainesRes] = await Promise.all([
         fetch('/api/admin/alerts'),
         fetch('/api/admin/market-prices'),
         fetch('/api/admin/infrastructures'),
@@ -56,10 +96,12 @@ export default function AdminPanel() {
         fetch('/api/admin/communal-infos'),
         fetch('/api/admin/projects'),
         fetch('/api/admin/dashboard-stats'),
-        fetch('/api/weather')
+        fetch('/api/weather'),
+        fetch('/api/cartotheque/cartes?statut=tous'),
+        fetch('/api/cartotheque/domaines')
       ])
 
-      const [alerts, marketPrices, infrastructures, crops, communalInfos, projects, dashboardStats, weather] = await Promise.all([
+      const [alerts, marketPrices, infrastructures, crops, communalInfos, projects, dashboardStats, weather, cartesData, domainesData] = await Promise.all([
         alertsRes.json(),
         marketRes.json(),
         infraRes.json(),
@@ -67,7 +109,9 @@ export default function AdminPanel() {
         infosRes.json(),
         projectsRes.json(),
         statsRes.json(),
-        weatherRes.json()
+        weatherRes.json(),
+        cartesRes.json(),
+        domainesRes.json()
       ])
 
       setAdminData({
@@ -78,7 +122,9 @@ export default function AdminPanel() {
         communalInfos: communalInfos.data || [],
         projects: projects.data || [],
         dashboardStats: dashboardStats.data,
-        weatherData: weather.success ? weather.data : null
+        weatherData: weather.success ? weather.data : null,
+        cartes: cartesData.results || cartesData.data || (Array.isArray(cartesData) ? cartesData : []),
+        cartoDomaines: domainesData.results || domainesData.data || (Array.isArray(domainesData) ? domainesData : [])
       })
     } catch (error) {
       console.error('Error fetching admin data:', error)
@@ -135,6 +181,42 @@ export default function AdminPanel() {
         return
       }
 
+      // Gérer le cas spécial de la cartothèque (FormData avec images)
+      if (data.type === 'carte') {
+        const formData = new FormData()
+        formData.append('titre', data.titre || '')
+        formData.append('description', data.description || '')
+        if (data.domaine) formData.append('domaine', String(data.domaine))
+        formData.append('statut', data.statut || 'brouillon')
+        formData.append('auteur', data.auteur || '')
+        formData.append('source', data.source || '')
+        formData.append('mots_cles', data.mots_cles || '')
+        if (data.echelle) formData.append('echelle', data.echelle)
+        if (data.format_impression) formData.append('format_impression', data.format_impression)
+        if (data.date_edition) formData.append('date_edition', data.date_edition)
+        if (data.realisateur) formData.append('realisateur', data.realisateur)
+        formData.append('is_payant', String(data.is_payant || false))
+        if (data.prix) formData.append('prix', String(data.prix))
+        formData.append('couches_associees', JSON.stringify(data.couches_associees || []))
+
+        if (data.vignette_file) formData.append('vignette', data.vignette_file)
+        if (data.image_file) formData.append('image', data.image_file)
+
+        const endpoint = data.id ? `/api/cartotheque/cartes/${data.id}` : '/api/cartotheque/cartes'
+        const method = data.id ? 'PUT' : 'POST'
+
+        const response = await fetch(endpoint, { method, body: formData })
+        if (response.ok) {
+          await fetchAllData()
+          setEditingItem(null)
+          setShowForm(false)
+        } else {
+          const errData = await response.json().catch(() => ({}))
+          console.error('Carte save failed:', response.status, errData)
+        }
+        return
+      }
+
       // Mapper les noms d'onglets vers les routes API correctes
       const routeMap: { [key: string]: string } = {
         'market': 'market-prices',
@@ -172,6 +254,15 @@ export default function AdminPanel() {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cet élément ?')) return
 
     try {
+      // Cas spécial cartothèque
+      if (type === 'cartotheque') {
+        const response = await fetch(`/api/cartotheque/cartes/${id}`, { method: 'DELETE' })
+        if (response.ok) {
+          await fetchAllData()
+        }
+        return
+      }
+
       // Mapper les noms d'onglets vers les routes API correctes
       const routeMap: { [key: string]: string } = {
         'market': 'market-prices',
@@ -691,6 +782,121 @@ export default function AdminPanel() {
           </div>
         )}
 
+        {activeTab === 'cartotheque' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold">Cartes thématiques ({adminData.cartes.length})</h3>
+              <button
+                onClick={() => {
+                  setEditingItem({
+                    type: 'carte',
+                    titre: '', description: '', domaine: null,
+                    statut: 'brouillon', auteur: '', source: '', mots_cles: '',
+                    echelle: '', format_impression: '', date_edition: '',
+                    realisateur: '', is_payant: false, prix: null,
+                    couches_associees: [], vignette_file: null, image_file: null
+                  })
+                  setShowForm(true)
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Publier une carte
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vignette</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Titre</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Domaine</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Échelle</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {adminData.cartes.map((carte: CarteTheematique) => (
+                    <tr key={carte.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        {carte.vignette_url || carte.image_url ? (
+                          <img src={carte.image_url || carte.vignette_url || ''} alt="" className="w-12 h-12 object-cover rounded" />
+                        ) : (
+                          <div className="w-12 h-12 bg-gray-200 rounded flex items-center justify-center">
+                            <Map className="w-5 h-5 text-gray-400" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium text-gray-900">{carte.titre}</div>
+                        <div className="text-xs text-gray-500">{carte.realisateur || carte.auteur}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {carte.domaine_nom && (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full" style={{
+                            backgroundColor: `${carte.domaine_couleur || '#10b981'}20`,
+                            color: carte.domaine_couleur || '#10b981'
+                          }}>
+                            {carte.domaine_nom}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{carte.echelle || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          carte.statut === 'publie' ? 'bg-green-100 text-green-800' :
+                          carte.statut === 'brouillon' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {carte.statut === 'publie' ? 'Publié' : carte.statut === 'brouillon' ? 'Brouillon' : carte.statut}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {carte.is_payant && carte.prix ? (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">
+                            <Lock className="w-3 h-3 inline mr-1" />
+                            {carte.prix_formate || `${carte.prix.toLocaleString('fr-FR')} F CFA`}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-emerald-100 text-emerald-800">
+                            <Unlock className="w-3 h-3 inline mr-1" />
+                            Gratuit
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {new Date(carte.date_creation).toLocaleDateString('fr-FR')}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => {
+                              setEditingItem({ ...carte, type: 'carte' })
+                              setShowForm(true)
+                            }}
+                            className="text-indigo-600 hover:text-indigo-900"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete('cartotheque', String(carte.id))}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {['water', 'infos', 'projects'].includes(activeTab) && (
           <div className="bg-white rounded-lg shadow p-8">
             <div className="text-center">
@@ -711,11 +917,12 @@ export default function AdminPanel() {
       {/* Edit Modal */}
       {editingItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className={`bg-white rounded-lg shadow-xl p-6 ${editingItem.type === 'carte' ? 'w-full max-w-3xl' : 'w-full max-w-2xl'} max-h-[90vh] overflow-y-auto`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">
                 {editingItem.type === 'weather' ? 'Modifier la météo' :
                  editingItem.type === 'crop' ? (editingItem.id ? 'Modifier la culture' : 'Nouvelle culture') :
+                 editingItem.type === 'carte' ? (editingItem.id ? 'Modifier la carte' : 'Publier une carte') :
                  `Modifier ${editingItem.name || editingItem.title || editingItem.product}`}
               </h3>
               <button
@@ -725,7 +932,7 @@ export default function AdminPanel() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <EditForm item={editingItem} onSave={(data) => handleSave(activeTab, data)} onCancel={() => setEditingItem(null)} />
+            <EditForm item={editingItem} onSave={(data) => handleSave(activeTab, data)} onCancel={() => setEditingItem(null)} cartoDomaines={adminData.cartoDomaines} />
           </div>
         </div>
       )}
@@ -759,7 +966,8 @@ export default function AdminPanel() {
                        activeTab === 'weather' ? 'weather' : null 
               }} 
               onSave={(data) => handleSave(activeTab, data)} 
-              onCancel={() => setShowForm(false)} 
+              onCancel={() => setShowForm(false)}
+              cartoDomaines={adminData.cartoDomaines}
             />
           </div>
         </div>
@@ -768,10 +976,11 @@ export default function AdminPanel() {
   )
 }
 
-function EditForm({ item, onSave, onCancel }: { 
+function EditForm({ item, onSave, onCancel, cartoDomaines }: { 
   item: any
   onSave: (data: any) => void
   onCancel: () => void 
+  cartoDomaines?: CartoDomaine[]
 }) {
   const [formData, setFormData] = useState(() => {
     // Pré-remplir les données pour les alertes
@@ -1031,6 +1240,263 @@ function EditForm({ item, onSave, onCancel }: {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 placeholder="Ex: NPK 15-15-15"
               />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Carte Form */}
+      {item.type === 'carte' && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Titre de la carte *</label>
+            <input
+              type="text"
+              value={formData.titre || ''}
+              onChange={(e) => handleChange('titre', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="Ex: Carte des établissements de santé"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea
+              value={formData.description || ''}
+              onChange={(e) => handleChange('description', e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="Décrivez le contenu et l'objectif de cette carte..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Domaine</label>
+              <select
+                value={formData.domaine || ''}
+                onChange={(e) => handleChange('domaine', e.target.value || null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">— Sélectionner —</option>
+                {cartoDomaines?.map((d) => (
+                  <option key={d.id} value={d.id}>{d.nom}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+              <select
+                value={formData.statut || 'brouillon'}
+                onChange={(e) => handleChange('statut', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="brouillon">Brouillon</option>
+                <option value="publie">Publié</option>
+                <option value="archive">Archivé</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Réalisateur</label>
+              <input
+                type="text"
+                value={formData.realisateur || ''}
+                onChange={(e) => handleChange('realisateur', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="Ex: Service SIG"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Auteur</label>
+              <input
+                type="text"
+                value={formData.auteur || ''}
+                onChange={(e) => handleChange('auteur', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="Nom de l'auteur"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
+              <input
+                type="text"
+                value={formData.source || ''}
+                onChange={(e) => handleChange('source', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="Ex: INSED, DGSC"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Mots-clés</label>
+              <input
+                type="text"
+                value={formData.mots_cles || ''}
+                onChange={(e) => handleChange('mots_cles', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="santé, hôpitaux, centres de santé"
+              />
+            </div>
+          </div>
+
+          <div className="border-t pt-4 mt-2">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <Ruler className="w-4 h-4" />
+              Fiche technique
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Échelle</label>
+                <input
+                  type="text"
+                  value={formData.echelle || ''}
+                  onChange={(e) => handleChange('echelle', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Ex: 1:50000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Format d'impression</label>
+                <select
+                  value={formData.format_impression || ''}
+                  onChange={(e) => handleChange('format_impression', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">— Non défini —</option>
+                  <option value="A0">A0 (841 x 1189 mm)</option>
+                  <option value="A1">A1 (594 x 841 mm)</option>
+                  <option value="A2">A2 (420 x 594 mm)</option>
+                  <option value="A3">A3 (297 x 420 mm)</option>
+                  <option value="A4">A4 (210 x 297 mm)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date d'édition</label>
+                <input
+                  type="date"
+                  value={formData.date_edition || ''}
+                  onChange={(e) => handleChange('date_edition', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prix</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_payant || false}
+                      onChange={(e) => {
+                        handleChange('is_payant', e.target.checked)
+                        if (!e.target.checked) handleChange('prix', null)
+                      }}
+                      className="rounded"
+                    />
+                    Payant
+                  </label>
+                  {formData.is_payant && (
+                    <input
+                      type="number"
+                      value={formData.prix || ''}
+                      onChange={(e) => handleChange('prix', e.target.value ? parseFloat(e.target.value) : null)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="Prix en F CFA"
+                      min="0"
+                      step="500"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-4 mt-2">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <Upload className="w-4 h-4" />
+              Images
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vignette (aperçu)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleChange('vignette_file', e.target.files?.[0] || null)}
+                  className="w-full text-sm"
+                />
+                {formData.vignette_url && !formData.vignette_file && (
+                  <p className="text-xs text-gray-400 mt-1">Image actuelle: {formData.vignette_url}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Image de la carte (visualisation)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleChange('image_file', e.target.files?.[0] || null)}
+                  className="w-full text-sm"
+                />
+                {formData.image_url && !formData.image_file && (
+                  <p className="text-xs text-gray-400 mt-1">Image actuelle: {formData.image_url}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-4 mt-2">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <Layers className="w-4 h-4" />
+              Couches du géoportail
+            </h4>
+            <div className="grid grid-cols-2 gap-2 border rounded-lg p-3 bg-gray-50">
+              {[
+                { id: 'cantons', name: 'Cantons' },
+                { id: 'communes', name: 'Communes' },
+                { id: 'routes', name: 'Routes' },
+                { id: 'hopitaux', name: 'Hôpitaux' },
+                { id: 'jardins', name: "Jardins d'enfants" },
+                { id: 'colleges', name: 'Collèges' },
+                { id: 'lycees', name: 'Lycées' },
+                { id: 'peas', name: 'Forages PEA' },
+                { id: 'bornefontaines', name: 'Bornes fontaines' },
+                { id: 'marches', name: 'Marchés' },
+                { id: 'cooperatives', name: 'Coopératives' },
+                { id: 'magasins', name: 'Magasins / Intrants' },
+                { id: 'chateaux', name: 'Châteaux' },
+                { id: 'terrains', name: 'Terrains / Stades' },
+              ].map((layer) => (
+                <label
+                  key={layer.id}
+                  className={`flex items-center gap-2 text-sm p-2 rounded cursor-pointer transition-colors ${
+                    (formData.couches_associees || []).includes(layer.id)
+                      ? 'bg-green-100 border border-green-300'
+                      : 'hover:bg-gray-100 border border-transparent'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={(formData.couches_associees || []).includes(layer.id)}
+                    onChange={(e) => {
+                      const current = formData.couches_associees || []
+                      handleChange('couches_associees', e.target.checked
+                        ? [...current, layer.id]
+                        : current.filter((l: string) => l !== layer.id)
+                      )
+                    }}
+                    className="rounded"
+                  />
+                  {layer.name}
+                </label>
+              ))}
             </div>
           </div>
         </>

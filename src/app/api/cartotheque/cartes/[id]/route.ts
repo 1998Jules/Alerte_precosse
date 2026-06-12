@@ -8,57 +8,64 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const response = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/${id}/`, {
+
+    // D'abord recuperer les details de la carte pour verifier l'URL de l'image
+    const detailResponse = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/${id}/`, {
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!response.ok) throw new Error(`Erreur API Django: ${response.status}`);
-    const data = await response.json();
-    return NextResponse.json({ success: true, data });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const contentType = request.headers.get('content-type') || '';
-    let djangoResponse: Response;
-
-    if (contentType.includes('multipart/form-data')) {
-      const formData = await request.formData();
-      djangoResponse = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/${id}/`, {
-        method: 'PUT', body: formData,
-      });
-    } else {
-      const body = await request.json();
-      djangoResponse = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/${id}/`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
+    if (!detailResponse.ok) {
+      throw new Error(`Carte non trouvee: ${detailResponse.status}`);
     }
 
-    if (!djangoResponse.ok) throw new Error(`Erreur API Django: ${djangoResponse.status}`);
-    const data = await djangoResponse.json();
-    return NextResponse.json({ success: true, data });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
+    const detailData = await detailResponse.json();
+    const carte = detailData;
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const response = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/${id}/`, {
-      method: 'DELETE',
+    // Verifier si la carte est gratuite
+    if (carte.is_payant) {
+      return NextResponse.json(
+        { success: false, error: 'Cette carte est payante. Veuillez proceder au paiement.' },
+        { status: 403 }
+      );
+    }
+
+    // Determiner l'URL de l'image a telecharger
+    const imageUrl = carte.image_url || carte.vignette_url;
+
+    if (!imageUrl) {
+      return NextResponse.json(
+        { success: false, error: 'Aucune image disponible pour le telechargement' },
+        { status: 404 }
+      );
+    }
+
+    // Telecharger l'image depuis Django
+    const imageResponse = await fetch(imageUrl);
+
+    if (!imageResponse.ok) {
+      throw new Error(`Erreur de telechargement de l'image: ${imageResponse.status}`);
+    }
+
+    const imageBuffer = await imageResponse.arrayBuffer();
+
+    // Determiner le content-type
+    const contentType = imageResponse.headers.get('content-type') || 'image/png';
+
+    // Generer un nom de fichier
+    const filename = `${carte.titre?.replace(/[^a-zA-Z0-9\u00C0-\u024F]/g, '_') || 'carte'}_${id}.png`;
+
+    return new NextResponse(imageBuffer, {
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+        'Content-Length': imageBuffer.byteLength.toString(),
+      },
     });
-    return NextResponse.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('Erreur download carte:', error.message);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
   }
 }
