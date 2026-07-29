@@ -15,7 +15,7 @@ import {
   ChevronDown, Layers, LayoutGrid, Lock, Unlock,
 } from 'lucide-react'
 import { useLanguage } from '@/app/contexts/LanguageContext'
-import CarteViewer from './CarteViewer'
+import CarteViewer from './CarteViewer.tsxs'
 
 // Types
 interface Domaine {

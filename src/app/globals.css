@@ -120,3 +120,57 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+/* ============================ */
+/* FIX Z-INDEX LEAFLET         */
+/* ============================ */
+
+/* Forcer Leaflet à rester sous nos overlays */
+.leaflet-pane {
+  z-index: 0 !important;
+}
+
+.leaflet-tile-pane {
+  z-index: 1 !important;
+}
+
+.leaflet-overlay-pane {
+  z-index: 2 !important;
+}
+
+.leaflet-shadow-pane {
+  z-index: 3 !important;
+}
+
+.leaflet-marker-pane {
+  z-index: 4 !important;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 5 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: 6 !important;
+}
+
+/* Les contrôles Leaflet (zoom, etc.) */
+.leaflet-control {
+  z-index: 1000 !important;
+}
+
+/* S'assurer que le container Leaflet ne crée pas de stacking context trop haut */
+.leaflet-container {
+  z-index: 1;
+}
+
+/* Les popups doivent rester visibles au-dessus de la carte */
+.leaflet-popup {
+  z-index: 1500 !important;
+}
+
+/* Le panneau de recherche doit être au-dessus de tout */
+.search-dropdown {
+  z-index: 2000 !important;
+}

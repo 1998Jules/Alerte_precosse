@@ -1,42 +1,20 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertTriangle, TrendingUp, Users, Building, TreePine, Droplets, Plus, Edit, Trash2, Save, X, Eye, BarChart3, Settings, Database, RefreshCw, Cloud, Thermometer, Map, Lock, Unlock, Upload, Layers, Link, Ruler, Printer, Loader2 } from 'lucide-react'
+import { AlertTriangle, TrendingUp, Users, Building, TreePine, Droplets, Plus, Edit, Trash2, Save, X, Eye, BarChart3, Settings, Database, RefreshCw, Cloud, Thermometer, Map, MapPinned, Lock, Unlock, Upload, Layers, Link, Ruler, Printer, Loader2, FileText } from 'lucide-react'
 
-interface CarteTheematique {
-  id: number
-  titre: string
-  description: string
-  domaine: number | null
-  domaine_nom: string | null
-  domaine_couleur: string | null
-  vignette_url: string | null
-  image_url: string | null
-  type_carte: string
-  statut: string
-  auteur: string
-  source: string
-  mots_cles: string
-  date_creation: string
-  date_modification: string
-  echelle: string | null
-  format_impression: string | null
-  date_edition: string | null
-  realisateur: string | null
-  is_payant: boolean
-  prix: number | null
-  prix_formate: string | null
-  couches_associees: string[]
+// Import des types partagés depuis la cartothèque
+import type { CarteTheematique as CarteTheematiqueBase, Domaine } from '@/components/cartotheque/types'
+
+// Interface locale étendue pour l'admin (CRUD + champs fichier upload)
+interface CarteTheematique extends CarteTheematiqueBase {
+  vignette_file?: File | null
+  image_file?: File | null
+  geojson_file_upload?: File | null
 }
 
-interface CartoDomaine {
-  id: number
-  nom: string
-  slug: string
-  icone: string
-  couleur: string
-  nombre_cartes: number
-}
+// Réutilise le type Domaine partagé
+type CartoDomaine = Domaine
 
 interface AdminData {
   alerts: any[]
@@ -78,7 +56,7 @@ export default function AdminPanel() {
     { id: 'water', label: 'Eau', icon: Droplets },
     { id: 'infos', label: 'Infos communales', icon: Users },
     { id: 'projects', label: 'Projets', icon: Settings },
-    { id: 'cartotheque', label: 'Cartothèque', icon: Map }
+    { id: 'cartotheque', label: 'Cartothèque', icon: MapPinned }
   ]
 
   useEffect(() => {
@@ -187,6 +165,7 @@ export default function AdminPanel() {
         formData.append('titre', data.titre || '')
         formData.append('description', data.description || '')
         if (data.domaine) formData.append('domaine', String(data.domaine))
+        formData.append('type_carte', data.type_carte || 'fichier')
         formData.append('statut', data.statut || 'brouillon')
         formData.append('auteur', data.auteur || '')
         formData.append('source', data.source || '')
@@ -198,9 +177,11 @@ export default function AdminPanel() {
         formData.append('is_payant', String(data.is_payant || false))
         if (data.prix) formData.append('prix', String(data.prix))
         formData.append('couches_associees', JSON.stringify(data.couches_associees || []))
+        if (data.geojson_url) formData.append('geojson_url', data.geojson_url)
 
         if (data.vignette_file) formData.append('vignette', data.vignette_file)
         if (data.image_file) formData.append('image', data.image_file)
+        if (data.geojson_file_upload) formData.append('geojson_file', data.geojson_file_upload)
 
         const endpoint = data.id ? `/api/cartotheque/cartes/${data.id}` : '/api/cartotheque/cartes'
         const method = data.id ? 'PUT' : 'POST'
@@ -213,6 +194,12 @@ export default function AdminPanel() {
         } else {
           const errData = await response.json().catch(() => ({}))
           console.error('Carte save failed:', response.status, errData)
+          // Afficher le détail de l'erreur Django (validation 400, etc.)
+          const msg = errData.error || errData.detail || `Erreur ${response.status}`
+          const fieldErrors = errData.errors ? Object.entries(errData.errors)
+            .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+            .join('\n') : ''
+          alert(`Erreur lors de l'enregistrement :\n${msg}${fieldErrors ? '\n\n' + fieldErrors : ''}`)
         }
         return
       }
@@ -791,10 +778,11 @@ export default function AdminPanel() {
                   setEditingItem({
                     type: 'carte',
                     titre: '', description: '', domaine: null,
-                    statut: 'brouillon', auteur: '', source: '', mots_cles: '',
+                    type_carte: 'fichier', statut: 'brouillon', auteur: '', source: '', mots_cles: '',
                     echelle: '', format_impression: '', date_edition: '',
                     realisateur: '', is_payant: false, prix: null,
-                    couches_associees: [], vignette_file: null, image_file: null
+                    couches_associees: [], vignette_file: null, image_file: null,
+                    geojson_file_upload: null, geojson_url: ''
                   })
                   setShowForm(true)
                 }}
@@ -812,6 +800,7 @@ export default function AdminPanel() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Titre</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Domaine</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Échelle</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
@@ -845,6 +834,14 @@ export default function AdminPanel() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">{carte.echelle || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-slate-100 text-slate-700">
+                          {carte.type_carte === 'dynamique' ? 'Dynamique' :
+                           carte.type_carte === 'fichier' ? 'Fichier' :
+                           carte.type_carte === 'url_externe' ? 'URL externe' :
+                           carte.type_carte === 'vide' ? 'Vide' : carte.type_carte}
+                        </span>
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                           carte.statut === 'publie' ? 'bg-green-100 text-green-800' :
@@ -1271,7 +1268,7 @@ function EditForm({ item, onSave, onCancel, cartoDomaines }: {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Domaine</label>
               <select
@@ -1283,6 +1280,19 @@ function EditForm({ item, onSave, onCancel, cartoDomaines }: {
                 {cartoDomaines?.map((d) => (
                   <option key={d.id} value={d.id}>{d.nom}</option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Type de carte</label>
+              <select
+                value={formData.type_carte || 'fichier'}
+                onChange={(e) => handleChange('type_carte', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="fichier">Fichier statique</option>
+                <option value="dynamique">Dynamique (GeoPortail)</option>
+                <option value="url_externe">URL externe</option>
+                <option value="vide">Sans données</option>
               </select>
             </div>
             <div>
@@ -1448,6 +1458,37 @@ function EditForm({ item, onSave, onCancel, cartoDomaines }: {
                 {formData.image_url && !formData.image_file && (
                   <p className="text-xs text-gray-400 mt-1">Image actuelle: {formData.image_url}</p>
                 )}
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t pt-4 mt-2">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              Fichier GeoJSON / PDF
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Fichier (GeoJSON, PDF…)</label>
+                <input
+                  type="file"
+                  accept=".json,.geojson,.pdf"
+                  onChange={(e) => handleChange('geojson_file_upload', e.target.files?.[0] || null)}
+                  className="w-full text-sm"
+                />
+                {formData.geojson_file_url && !formData.geojson_file_upload && (
+                  <p className="text-xs text-gray-400 mt-1">Fichier actuel: {formData.geojson_file_url}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">URL GeoJSON (externe)</label>
+                <input
+                  type="url"
+                  value={formData.geojson_url || ''}
+                  onChange={(e) => handleChange('geojson_url', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="https://example.com/data.geojson"
+                />
               </div>
             </div>
           </div>
