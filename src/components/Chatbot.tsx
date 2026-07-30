@@ -1,15 +1,34 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
-import { useLanguage } from '@/app/contexts/LanguageContext'
-import { MessageSquare, Send, X, Bot, Mic, MicOff, CloudRain, Droplets, Wind, Thermometer, Sun } from 'lucide-react'
-import VoiceRecognition from './VoiceRecognition'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import {
+  Send,
+  Bot,
+  User,
+  Leaf,
+  CloudSun,
+  Bell,
+  MapPin,
+  Trash2,
+  Sparkles,
+  MessageSquare,
+  X,
+  ChevronUp,
+} from 'lucide-react'
 
-interface Message {
+// ============================================================
+// Types
+// ============================================================
+
+interface AlertData {
   id: string
-  text: string
-  sender: 'user' | 'bot'
-  timestamp: Date
+  title: string
+  description: string
+  type: string
+  level: string
+  status: string
+  location?: string
+  time?: string
 }
 
 interface WeatherData {
@@ -17,280 +36,395 @@ interface WeatherData {
   humidity: number
   rainfall: number
   forecast: string
-  windSpeed?: number
   lastUpdate: string
+  windSpeed: number
 }
+
+interface Message {
+  id: string
+  text: string
+  sender: 'user' | 'bot'
+  timestamp: Date
+  category?: string
+  liveData?: boolean
+  intent?: string
+}
+
+interface QuickQuestion {
+  id: string
+  text: string
+  icon: React.ReactNode
+  category: string
+}
+
+// ============================================================
+// Données constantes
+// ============================================================
+
+const quickQuestions: QuickQuestion[] = [
+  { id: 'q1', text: 'Météo actuelle', icon: <CloudSun className="w-4 h-4" />, category: 'meteo' },
+  { id: 'q2', text: 'Prévisions météo 5 jours', icon: <CloudSun className="w-4 h-4" />, category: 'meteo' },
+  { id: 'q3', text: 'Cultures en cours', icon: <Leaf className="w-4 h-4" />, category: 'agriculture' },
+  { id: 'q4', text: 'Alertes actives', icon: <Bell className="w-4 h-4" />, category: 'alerte' },
+  { id: 'q5', text: 'Prix du marché', icon: <MapPin className="w-4 h-4" />, category: 'commune' },
+  { id: 'q6', text: 'NDVI champ de M. ATOKOU', icon: <Sparkles className="w-4 h-4" />, category: 'agriculture' },
+  { id: 'q7', text: 'Statistiques commune', icon: <MapPin className="w-4 h-4" />, category: 'commune' },
+]
+
+const categoryColors: Record<string, string> = {
+  agriculture: 'bg-green-100 text-green-800',
+  meteo: 'bg-blue-100 text-blue-800',
+  alerte: 'bg-red-100 text-red-800',
+  commune: 'bg-purple-100 text-purple-800',
+  general: 'bg-gray-100 text-gray-800',
+}
+
+const categoryLabels: Record<string, string> = {
+  agriculture: '🌾 Agriculture',
+  meteo: '🌤️ Météo',
+  alerte: '🚨 Alerte',
+  commune: '🏘️ Commune',
+  general: 'ℹ️ Général',
+}
+
+function formatMarkdown(text: string): string {
+  let formatted = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br />')
+  return formatted
+}
+
+// ============================================================
+// Composant Chatbot
+// ============================================================
 
 interface ChatbotProps {
-  alerts?: any[]
+  alerts?: AlertData[]
   weatherData?: WeatherData
-  weatherForecast?: any[]
 }
 
-export default function Chatbot({ alerts = [], weatherData, weatherForecast }: ChatbotProps) {
-  const { t, speechLanguage } = useLanguage()
-
+export default function Chatbot({ alerts = [], weatherData }: ChatbotProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: '1',
-      text: t('chatbot.welcome') || "Bonjour ! Je suis votre assistant agricole. Je peux vous donner la météo actuelle ou les alertes en cours.",
+      id: 'welcome',
+      text: `Bonjour ! Je suis **AgriBot**, votre assistant IA pour le système **SysLAP - Alerte Précoce** au Togo 🇹🇬<br /><br />Je peux vous aider sur :<br />🌾 **Agriculture** : cultures, parcelles, saisons, rendements<br />🌤️ **Météo** : conditions actuelles et prévisions<br />🚨 **Alertes** : sécheresse, inondation, prix du marché<br />🏘️ **Commune** : infrastructures, population, projets<br /><br />Posez-moi une question ou cliquez sur une suggestion ci-dessous !`,
       sender: 'bot',
       timestamp: new Date(),
+      category: 'general',
     }
   ])
   const [inputText, setInputText] = useState('')
-  const [isTyping, setIsTyping] = useState(false)
-  const [showVoicePanel, setShowVoicePanel] = useState(true)
-  const [isConversationMode, setIsConversationMode] = useState(false)
-  const [textToSpeak, setTextToSpeak] = useState<string | null>(null)
-  
+  const [isLoading, setIsLoading] = useState(false)
+  const [sessionId] = useState(() => `session-${Date.now()}`)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  
-  // Utilisation d'une ref pour accéder aux données météo les plus récentes
-  // même si le state du composant ne déclenche pas un re-render immédiat
-  const weatherDataRef = useRef<WeatherData | undefined>(weatherData)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Mise à jour de la ref dès que weatherData change (venant du parent)
-  useEffect(() => {
-    weatherDataRef.current = weatherData
-  }, [weatherData])
-
-  useEffect(() => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [])
 
-  // Synthèse vocale si le mode conversation est actif
   useEffect(() => {
-    const lastMessage = messages[messages.length - 1]
-    if (lastMessage?.sender === 'bot' && isConversationMode) {
-      setTimeout(() => {
-        setTextToSpeak(lastMessage.text)
-      }, 500)
+    if (isOpen) scrollToBottom()
+  }, [messages, isOpen, scrollToBottom])
+
+  // Focus input quand le chatbot s'ouvre
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 300)
     }
-  }, [messages, isConversationMode])
+  }, [isOpen])
 
-  const getBotResponse = async (userMessage: string): Promise<string> => {
-    setIsTyping(true)
-    // Simulation d'un délai de réflexion
-    await new Promise(resolve => setTimeout(resolve, 800))
-
-    const msg = userMessage.toLowerCase()
-    const currentWeather = weatherDataRef.current
-
-    // --- LOGIQUE MÉTÉO ---
-    const weatherKeywords = ['température', 'météo', 'il fait', 'dehors', 'pleut', 'vent', 'prévision', 'aujourd\'hui', 'temps', 'chaud', 'froid', 'humidité', 'pluie']
-    
-    if (weatherKeywords.some(keyword => msg.includes(keyword))) {
-      
-      // Si les données météo ne sont pas encore chargées
-      if (!currentWeather) {
-        return "Je n'ai pas encore reçu les données météo du système. Veuillez patienter que le capteur se synchronise."
-      }
-
-      // Réponses spécifiques
-      if (msg.includes('température') || msg.includes('il fait') || msg.includes('chaud') || msg.includes('froid')) {
-        return `🌡️ Actuellement, il fait **${currentWeather.temperature}°C**.`
-      }
-      
-      if (msg.includes('vent')) {
-        return `💨 Le vent souffle à environ **${currentWeather.windSpeed || 0} km/h**.`
-      }
-
-      if (msg.includes('pluie') || msg.includes('humidité')) {
-        return `💧 Taux d'humidité : **${currentWeather.humidity}%**.\nPrécipitations récentes : **${currentWeather.rainfall}mm**.\n${currentWeather.forecast}`
-      }
-
-      // Réponse globale météo
-      let response = `🌤️ **Météo Actuelle** :\n`
-      response += `• Température : ${currentWeather.temperature}°C\n`
-      response += `• Humidité : ${currentWeather.humidity}%\n`
-      if (currentWeather.windSpeed) response += `• Vent : ${currentWeather.windSpeed} km/h\n`
-      if (currentWeather.rainfall > 0) response += `• Pluie : ${currentWeather.rainfall}mm\n`
-      response += `\n📝 Prévision : ${currentWeather.forecast}`
-      return response
-    }
-
-    // --- LOGIQUE ALERTES ---
-    const stopWords = ['le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 'et', 'ou', 'pour', 'avec', 'dans', 'sur', 'a', 'est', 'sont', 'il', 'y', 'quoi', 'comment', 'où', 'qui']
-    const keywords = msg.split(/\s+/).filter(word => word.length > 2 && !stopWords.includes(word))
-
-    if (keywords.length === 0) {
-      return "Pourriez-vous reformuler avec des mots clés précis ? (ex: météo, alerte, inondation, température)"
-    }
-
-    // Recherche de la meilleure alerte correspondante
-    let bestMatch = null
-    let maxScore = 0
-
-    alerts.forEach((alert: any) => {
-      let typeText = alert.type
-      if (alert.type === 'flood') typeText += ' inondation eau pluie'
-      if (alert.type === 'drought') typeText += ' sécheresse chaleur canicule température'
-      if (alert.type === 'price') typeText += ' marché prix argent coût'
-      if (alert.type === 'fire') typeText += ' incendie feu brûler'
-
-      const fullAlertText = `${alert.title} ${alert.description} ${typeText} ${alert.location || ''} ${alert.level}`.toLowerCase()
-
-      let score = 0
-      keywords.forEach(keyword => {
-        if (fullAlertText.includes(keyword)) score++
-      })
-
-      if (score > maxScore) {
-        maxScore = score
-        bestMatch = alert
-      }
-    })
-
-    if (bestMatch && maxScore > 0) {
-      return `⚠️ **Info Alerte** : ${bestMatch.title}\n\n${bestMatch.description}`
-    }
-
-    // Réponse générique
-    if (keywords.some(k => ['tout', 'alerte', 'situation', 'danger'].includes(k))) {
-      const count = alerts.length
-      if (count === 0) return "Il n'y a actuellement aucune alerte enregistrée dans le système."
-      return `Il y a ${count} alerte(s) au total. La météo est actuellement de ${currentWeather?.temperature}°C. Dites-moi un sujet (ex: 'météo', 'eau') pour en savoir plus.`
-    }
-
-    return "Je n'ai pas trouvé d'information précise correspondant à votre demande. Essayez de demander 'Quelle température' ou 'Quelles alertes'."
-  }
-
-  const handleSendMessage = async (textToSend?: string) => {
-    const finalText = textToSend || inputText
-    if (!finalText.trim()) return
+  const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim() || isLoading) return
 
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: finalText,
+      id: `user-${Date.now()}`,
+      text: text.trim(),
       sender: 'user',
       timestamp: new Date(),
     }
-    
+
     setMessages(prev => [...prev, userMessage])
     setInputText('')
-    setTextToSpeak(null)
+    setIsLoading(true)
 
-    // Appel à la logique de réponse
-    const botResponse = await getBotResponse(finalText)
-    
-    const botMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      text: botResponse,
-      sender: 'bot',
-      timestamp: new Date(),
+    try {
+      const response = await fetch('/api/chatbot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text.trim(),
+          sessionId,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        const botMessage: Message = {
+          id: `bot-${Date.now()}`,
+          text: data.response,
+          sender: 'bot',
+          timestamp: new Date(),
+          category: data.category || 'general',
+          liveData: data.hasLiveData || false,
+          intent: data.intent || undefined,
+        }
+        setMessages(prev => [...prev, botMessage])
+      } else {
+        setMessages(prev => [...prev, {
+          id: `error-${Date.now()}`,
+          text: `❌ Erreur : ${data.error || 'Impossible de traiter votre demande.'}`,
+          sender: 'bot',
+          timestamp: new Date(),
+          category: 'general',
+        }])
+      }
+    } catch {
+      setMessages(prev => [...prev, {
+        id: `error-${Date.now()}`,
+        text: '❌ Erreur de connexion. Vérifiez votre connexion et réessayez.',
+        sender: 'bot',
+        timestamp: new Date(),
+        category: 'general',
+      }])
+    } finally {
+      setIsLoading(false)
     }
-    
-    setMessages(prev => [...prev, botMessage])
-    setIsTyping(false)
+  }, [isLoading, sessionId])
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    sendMessage(inputText)
   }
 
-  const handleVoiceInput = (text: string, isFinal: boolean) => {
-    setInputText(text)
-    if (isFinal && isConversationMode) {
-      handleSendMessage(text)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage(inputText)
     }
   }
+
+  const clearConversation = async () => {
+    try {
+      await fetch(`/api/chatbot?sessionId=${sessionId}`, { method: 'DELETE' })
+      setMessages([{
+        id: 'welcome-reset',
+        text: '🔄 Conversation réinitialisée. Comment puis-je vous aider ?',
+        sender: 'bot',
+        timestamp: new Date(),
+        category: 'general',
+      }])
+    } catch { /* silencieux */ }
+  }
+
+  const handleQuickQuestion = (q: QuickQuestion) => {
+    sendMessage(q.text)
+  }
+
+  // Compteur d'alertes actives pour le badge
+  const activeAlertsCount = alerts.filter(a => a.status === 'active').length
 
   return (
     <>
+      {/* ============ BOUTON FLOTTANT ============ */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-green-600 rounded-full shadow-lg flex items-center justify-center hover:bg-green-700 transition-all duration-300"
-          aria-label="Ouvrir le chat"
+          className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-green-600 hover:bg-green-700 text-white shadow-xl shadow-green-600/30 hover:shadow-2xl hover:shadow-green-600/40 transition-all duration-300 hover:scale-110 flex items-center justify-center group"
+          title="Ouvrir AgriBot"
         >
-          {isConversationMode ? <Mic className="w-6 h-6 text-white animate-pulse" /> : <MessageSquare className="w-6 h-6 text-white" />}
+          <MessageSquare className="w-6 h-6 group-hover:hidden" />
+          <Bot className="w-6 h-6 hidden group-hover:block" />
+          {/* Badge alertes */}
+          {activeAlertsCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+              {activeAlertsCount}
+            </span>
+          )}
         </button>
       )}
 
+      {/* ============ FENÊTRE DE CHAT ============ */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 w-96 h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col border border-gray-200">
+        <div className="fixed bottom-6 right-6 z-50 w-[400px] max-w-[calc(100vw-3rem)] h-[600px] max-h-[calc(100vh-6rem)] bg-white rounded-2xl shadow-2xl shadow-black/20 border border-gray-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-300">
+
           {/* Header */}
-          <div className="bg-gradient-to-r from-green-600 to-green-800 text-white p-4 rounded-t-2xl flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Bot className="w-5 h-5" />
+          <div className="flex-shrink-0 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                <Bot className="w-5 h-5" />
+              </div>
               <div>
-                <span className="font-bold">Assistant Agricole</span>
-                <p className="text-[10px] opacity-80">Connecté à l'API Météo</p>
+                <h2 className="text-sm font-bold leading-tight">AgriBot IA</h2>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-green-300 animate-pulse" />
+                  <span className="text-[10px] text-green-100">En ligne — SysLAP</span>
+                </div>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setIsConversationMode(!isConversationMode)}
-                className={`p-2 rounded-full transition-colors ${isConversationMode ? 'bg-white text-green-700' : 'hover:bg-white/20'}`}
-                title={isConversationMode ? "Désactiver le vocal" : "Mode Conversation"}
+                onClick={clearConversation}
+                className="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                title="Nouvelle conversation"
               >
-                {isConversationMode ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-white/20 rounded-full">
-                <X className="w-5 h-5" />
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                title="Fermer"
+              >
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Voice Panel */}
-          {showVoicePanel && (
-            <div className="p-3 border-b bg-gray-50">
-              <VoiceRecognition
-                onVoiceInput={handleVoiceInput}
-                textToSpeak={textToSpeak}
-                language={speechLanguage}
-                isConversationMode={isConversationMode}
-              />
+          {/* Zone météo rapide */}
+          {weatherData && weatherData.temperature > 0 && (
+            <div className="flex-shrink-0 bg-gradient-to-r from-blue-50 to-sky-50 border-b border-blue-100 px-4 py-2">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="text-blue-700 font-medium">
+                    🌡️ {weatherData.temperature}°C
+                  </span>
+                  <span className="text-blue-600">
+                    💧 {weatherData.humidity}%
+                  </span>
+                  {weatherData.windSpeed > 0 && (
+                    <span className="text-blue-500">
+                      💨 {weatherData.windSpeed} km/h
+                    </span>
+                  )}
+                </div>
+                <span className="text-blue-400 text-[10px] truncate max-w-[120px]">
+                  {weatherData.forecast}
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4">
-            {messages.map((message) => (
-              <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl p-3 shadow-sm whitespace-pre-line ${
-                  message.sender === 'user' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-gray-800'
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
+            {messages.map(message => (
+              <div
+                key={message.id}
+                className={`flex gap-2.5 ${message.sender === 'user' ? 'flex-row-reverse' : ''}`}
+              >
+                {/* Avatar */}
+                <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${
+                  message.sender === 'bot'
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600'
+                    : 'bg-gradient-to-br from-gray-500 to-gray-600'
                 }`}>
-                  {/* Icône météo si le message contient des données météo */}
-                  {message.text.includes('Météo') && message.sender === 'bot' && (
-                    <div className="flex items-center space-x-1 mb-1 text-blue-600 font-bold">
-                      <CloudRain className="w-4 h-4" />
-                    </div>
-                  )}
-                  <p className="text-sm">{message.text}</p>
+                  {message.sender === 'bot'
+                    ? <Bot className="w-3.5 h-3.5 text-white" />
+                    : <User className="w-3.5 h-3.5 text-white" />
+                  }
+                </div>
+
+                {/* Message */}
+                <div className={`max-w-[80%] ${message.sender === 'user' ? 'items-end' : ''}`}>
+                  <div className={`rounded-xl px-3 py-2 text-[13px] leading-relaxed ${
+                    message.sender === 'bot'
+                      ? 'bg-gray-100 text-gray-800'
+                      : 'bg-green-600 text-white'
+                  }`}
+                    dangerouslySetInnerHTML={{ __html: formatMarkdown(message.text) }}
+                  />
+                  <div className={`flex items-center gap-1.5 mt-1 ${message.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                    <span className="text-[9px] text-gray-400">
+                      {message.timestamp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {message.sender === 'bot' && message.category && (
+                      <div className="flex items-center gap-1">
+                        {message.liveData && (
+                          <span className="text-[9px] px-1 py-0 h-3.5 bg-green-100 text-green-700 rounded font-medium flex items-center gap-0.5">
+                            <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
+                            Live
+                          </span>
+                        )}
+                        <span className={`text-[9px] px-1 py-0 h-3.5 rounded font-medium ${categoryColors[message.category] || ''}`}>
+                          {categoryLabels[message.category] || message.category}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
-            {isTyping && (
-              <div className="flex items-center space-x-2 text-xs text-gray-400 ml-2">
-                <div className="animate-bounce">●</div>
-                <div className="animate-bounce delay-100">●</div>
-                <div className="animate-bounce delay-200">●</div>
-                <span className="ml-1">Analyse des données...</span>
+
+            {/* Indicateur de frappe */}
+            {isLoading && (
+              <div className="flex gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
+                  <Bot className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div className="bg-gray-100 rounded-xl px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
               </div>
             )}
+
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area */}
-          <div className="p-3 border-t bg-white rounded-b-2xl">
-            <div className="flex space-x-2">
-              <input
-                type="text"
+          {/* Questions rapides */}
+          {messages.length <= 2 && (
+            <div className="flex-shrink-0 border-t border-gray-100 px-3 py-2">
+              <div className="flex flex-wrap gap-1">
+                {quickQuestions.map(q => (
+                  <button
+                    key={q.id}
+                    onClick={() => handleQuickQuestion(q)}
+                    className="text-[11px] px-2.5 py-1.5 rounded-lg bg-gray-100 hover:bg-green-50 hover:text-green-700 text-gray-600 transition-colors flex items-center gap-1.5"
+                  >
+                    {q.icon}
+                    <span>{q.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Input */}
+          <form onSubmit={handleSubmit} className="flex-shrink-0 border-t border-gray-200 p-3">
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={inputRef}
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Ex: Quelle température ?"
-                className="flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                disabled={isConversationMode}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleSendMessage() }}
+                onChange={e => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Posez votre question..."
+                className="flex-1 resize-none rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500/40 focus:border-green-500/40 transition-all min-h-[38px] max-h-[80px]"
+                rows={1}
+                style={{ height: 'auto' }}
+                onInput={e => {
+                  const target = e.target as HTMLTextAreaElement
+                  target.style.height = 'auto'
+                  target.style.height = Math.min(target.scrollHeight, 80) + 'px'
+                }}
+                disabled={isLoading}
               />
               <button
-                onClick={() => handleSendMessage()}
-                disabled={!inputText.trim()}
-                className="p-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                type="submit"
+                disabled={!inputText.trim() || isLoading}
+                className="w-[38px] h-[38px] rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors flex-shrink-0"
               >
-                <Send className="w-4 h-4" />
+                {isLoading
+                  ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  : <Send className="w-4 h-4" />
+                }
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
     </>
