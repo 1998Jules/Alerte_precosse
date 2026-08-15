@@ -142,6 +142,13 @@ interface CalendarEvent {
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
 }
 
+interface RegionWeatherData {
+  nom: string; capitale: string; lat: number; lon: number;
+  temperature: number | null; humidity: number | null; windSpeed: number | null;
+  pressure: number | null; weatherCode: number | null; description: string;
+  icon: string; emoji: string; iconColor: string;
+}
+
 // ========== Composant Helper Zoom ==========
 function ZoomControl() {
   const map = useMap()
@@ -816,7 +823,107 @@ function GrowthSimulator({ calendarData }: { calendarData: CropCalendarItem[] })
     </div>
   );
 }
+function getWeatherAnimationClass(code: number | null): string {
+  if (!code) return 'weather-anim-clear'
+  if (code >= 200 && code < 300) return 'weather-anim-storm'
+  if (code >= 300 && code < 600) return 'weather-anim-rain'
+  if (code >= 600 && code < 700) return 'weather-anim-snow'
+  if (code >= 700 && code < 800) return 'weather-anim-fog'
+  if (code === 800) return 'weather-anim-clear'
+  return 'weather-anim-clouds'
+}
 
+function getWeatherParticles(code: number | null): string {
+  if (!code) return ''
+  if (code >= 200 && code < 300) {
+    return `<div class="wp-particles wp-storm"><span></span><span></span><span></span><span></span><span></span><span></span></div>`
+  }
+  if (code >= 300 && code < 600) {
+    return `<div class="wp-particles wp-rain"><span></span><span></span><span></span><span></span><span></span></div>`
+  }
+  if (code >= 600 && code < 700) {
+    return `<div class="wp-particles wp-snow"><span></span><span></span><span></span><span></span></div>`
+  }
+  if (code === 800) {
+    return `<div class="wp-particles wp-sun"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>`
+  }
+  if (code > 800) {
+    return `<div class="wp-particles wp-clouds"><span></span><span></span></div>`
+  }
+  return ''
+}
+
+function RegionWeatherMarkers({ regions }: { regions: RegionWeatherData[] }) {
+  const map = useMap()
+  const [markers, setMarkers] = useState<L.LayerGroup>(L.layerGroup())
+
+  useEffect(() => {
+    markers.clearLayers()
+    regions.forEach((r, idx) => {
+      if (!r.temperature && r.temperature !== 0) return
+      const animClass = getWeatherAnimationClass(r.weatherCode)
+      const particles = getWeatherParticles(r.weatherCode)
+      const delay = idx * 0.3
+      const popupContent = `
+        <div class="weather-popup-card">
+          <div class="wpc-header" style="background:linear-gradient(135deg, ${r.iconColor}22, ${r.iconColor}44);">
+            <div class="wpc-emoji">${r.emoji}</div>
+            <div class="wpc-temp">${r.temperature}°C</div>
+          </div>
+          <div class="wpc-body">
+            <div class="wpc-name">${r.nom}</div>
+            <div class="wpc-desc">${r.description}</div>
+            <div class="wpc-stats">
+              <div class="wpc-stat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                <span>${r.humidity}%</span>
+              </div>
+              <div class="wpc-stat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/></svg>
+                <span>${r.windSpeed} km/h</span>
+              </div>
+              <div class="wpc-stat">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <span>${r.pressure || '--'} hPa</span>
+              </div>
+            </div>
+          </div>
+          <div class="wpc-footer">📍 ${r.capitale}</div>
+        </div>`
+      const icon = L.divIcon({
+        className: 'region-weather-marker',
+        html: `
+        <div class="wp-container ${animClass}" style="--glow-color:${r.iconColor};--delay:${delay}s;">
+          <div class="wp-ring wp-ring-1"></div>
+          <div class="wp-ring wp-ring-2"></div>
+          <div class="wp-ring wp-ring-3"></div>
+          ${particles}
+          <div class="wp-core">
+            <div class="wp-emoji">${r.emoji}</div>
+          </div>
+          <div class="wp-label">${r.temperature}°</div>
+        </div>`,
+        iconSize: [70, 70],
+        iconAnchor: [35, 35],
+        popupAnchor: [0, -40],
+      })
+      const marker = L.marker([r.lat, r.lon], { icon }).bindPopup(popupContent, {
+        className: 'region-weather-popup',
+        closeButton: false,
+        maxWidth: 220,
+      })
+      markers.addLayer(marker)
+    })
+    markers.addTo(map)
+    return () => { markers.clearLayers() }
+  }, [regions, map])
+
+  useEffect(() => {
+    return () => { map.removeLayer(markers) }
+  }, [map, markers])
+
+  return null
+}
 // ========== Composant Principal ==========
 export default function AgricultureManagement() {
   const OPENWEATHER_API_KEY='947f9f56349e37e86784c5f031cda332'; 
@@ -1081,6 +1188,20 @@ export default function AgricultureManagement() {
       handleSelectField(selectedFieldId);
     }
   }, [selectedIndexType, compareMode]);
+  
+
+const [regionWeather, setRegionWeather] = useState<RegionWeatherData[]>([])
+
+useEffect(() => {
+  if (activeTab === 'explorer' && viewMode === 'admin' && analysisConfig.zoneType === 'region') {
+    fetch('/api/weather/regions')
+      .then(res => res.json())
+      .then(json => { if (json.success && json.data) setRegionWeather(json.data) })
+      .catch(err => console.error('Erreur meteo regions:', err))
+  }
+}, [activeTab, viewMode, analysisConfig.zoneType])
+
+
 
   // ========== FONCTIONS ==========
   const fetchNdviTiles = async () => {
@@ -2021,6 +2142,9 @@ export default function AgricultureManagement() {
                           }} 
                         />
                       ))}
+                      {viewMode === 'admin' && analysisConfig.zoneType === 'region' && regionWeather.length > 0 && (
+  <RegionWeatherMarkers regions={regionWeather} />
+)}
                     </MapContainer>
                   </div>
                   <div className="mt-2 flex justify-between items-center text-xs text-gray-500">

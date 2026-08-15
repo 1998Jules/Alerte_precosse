@@ -551,3 +551,10 @@ export default function CommuneApp() {
     </div>
   )
 }
+
+interface RegionWeatherData {
+  nom: string; capitale: string; lat: number; lon: number;
+  temperature: number | null; humidity: number | null; windSpeed: number | null;
+  pressure: number | null; weatherCode: number | null; description: string;
+  icon: string; emoji: string; iconColor: string;
+}
