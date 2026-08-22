@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   TreePine, Droplets, Sun, TrendingUp, TrendingDown, AlertTriangle, Calendar, MapPin,
   Users, Filter, Search, Plus, Edit, Eye, Download, Cloud, Thermometer,
@@ -13,7 +13,7 @@ import { EditControl } from 'react-leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
 
 import L from 'leaflet'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceArea, ComposedChart, Bar } from 'recharts'
 
 import 'leaflet/dist/leaflet.css'
 import Chatbot from '../Chatbot'
@@ -262,6 +262,9 @@ const IndexSelector = ({ value, onChange }: { value: string; onChange: (val: str
           </button>
         ))}
       </div>
+      <p className="text-[10px] text-gray-400 mt-2 text-center">
+        {indices.find(i => i.id === value)?.description}
+      </p>
     </div>
   );
 };
@@ -1041,6 +1044,23 @@ export default function AgricultureManagement() {
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
 
+  // ========== ÉTATS POUR L'ONGLET "TEMPS" (précipitations CHIRPS, température, prévision 14j) ==========
+  const [climateFieldId, setClimateFieldId] = useState<string>('');
+  const [climatePrecipitation, setClimatePrecipitation] = useState<any[]>([]);
+  const [climateTemperature, setClimateTemperature] = useState<any[]>([]);
+  const [climateCentroid, setClimateCentroid] = useState<{ lat: number; lon: number } | null>(null);
+  const [loadingClimate, setLoadingClimate] = useState(false);
+  const [climateIndexType, setClimateIndexType] = useState<'ndvi' | 'evi' | 'ndwi' | 'msavi'>('ndvi');
+  const [climateIndexData, setClimateIndexData] = useState<any[]>([]);
+  const [loadingClimateIndex, setLoadingClimateIndex] = useState(false);
+  const [forecast14, setForecast14] = useState<any[]>([]);
+  const [loadingForecast, setLoadingForecast] = useState(false);
+
+  // ========== ÉTATS : DÉTECTION AUTOMATIQUE SÉCHERESSE / INONDATION (CHIRPS / PNP) ==========
+  const [climateRisk, setClimateRisk] = useState<any>(null);
+  const [loadingRisk, setLoadingRisk] = useState(false);
+  const [creatingAutoAlert, setCreatingAutoAlert] = useState(false);
+
   // ========== NOUVEAUX ÉTATS : ANOMALIES D'INDICES ==========
   // Anomalies détectées sur la série temporelle du champ sélectionné (mode field, indice simple)
   const [fieldAnomalies, setFieldAnomalies] = useState<IndexAnomaly[]>([]);
@@ -1188,6 +1208,13 @@ export default function AgricultureManagement() {
       handleSelectField(selectedFieldId);
     }
   }, [selectedIndexType, compareMode]);
+
+  // 5. Onglet "Temps" : rafraîchir la série d'indice superposée quand elle change
+  useEffect(() => {
+    if (climateFieldId) {
+      fetchClimateIndex(climateFieldId, climateIndexType);
+    }
+  }, [climateIndexType]);
   
 
 const [regionWeather, setRegionWeather] = useState<RegionWeatherData[]>([])
@@ -1282,6 +1309,191 @@ useEffect(() => {
     } catch (e) { console.error(e); }
     finally { setLoadingChart(false); }
   };
+
+  // ========== ONGLET "TEMPS" : précipitations CHIRPS + température ERA5-Land + prévision 14j ==========
+
+  // 1. Récupère la série de l'indice choisi (superposée aux précipitations)
+  const fetchClimateIndex = async (champId: string, indexType: string) => {
+    setLoadingClimateIndex(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-ndvi/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ champ_id: champId, index_type: indexType })
+      });
+      const result = await res.json();
+      setClimateIndexData(result.success ? (result.data || []) : []);
+    } catch (e) {
+      console.error('Erreur récupération indice (Temps):', e);
+      setClimateIndexData([]);
+    } finally {
+      setLoadingClimateIndex(false);
+    }
+  };
+
+  // 2. Récupère précipitations CHIRPS + température ERA5-Land + centroïde du champ
+  const fetchFieldClimate = async (champId: string) => {
+    if (!champId) return;
+    setLoadingClimate(true);
+    setForecast14([]);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-climate/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ champ_id: champId })
+      });
+      const result = await res.json();
+      if (result.success) {
+        setClimatePrecipitation(result.precipitation || []);
+        setClimateTemperature(result.temperature || []);
+        setClimateCentroid(result.centroid || null);
+
+        // 3. Une fois le centroïde connu, lancer la prévision 14 jours (Open-Meteo)
+        if (result.centroid?.lat && result.centroid?.lon) {
+          fetchForecast14(result.centroid.lat, result.centroid.lon);
+        }
+      } else {
+        setClimatePrecipitation([]);
+        setClimateTemperature([]);
+        setClimateCentroid(null);
+      }
+    } catch (e) {
+      console.error('Erreur récupération climat champ:', e);
+      setClimatePrecipitation([]);
+      setClimateTemperature([]);
+    } finally {
+      setLoadingClimate(false);
+    }
+  };
+
+  // 4. Prévision météo à 14 jours (Open-Meteo, via la route Next.js)
+  const fetchForecast14 = async (lat: number, lon: number) => {
+    setLoadingForecast(true);
+    try {
+      const res = await fetch(`/api/weather/field-forecast?lat=${lat}&lon=${lon}`);
+      const result = await res.json();
+      setForecast14(result.success ? (result.data || []) : []);
+    } catch (e) {
+      console.error('Erreur prévision 14 jours:', e);
+      setForecast14([]);
+    } finally {
+      setLoadingForecast(false);
+    }
+  };
+
+  // 5. Calcule automatiquement le risque sécheresse (PNP 30j/90j) et inondation (anomalie 5j)
+  const fetchFieldClimateRisk = async (champId: string) => {
+    setLoadingRisk(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-climate-risk/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ champ_id: champId })
+      });
+      const result = await res.json();
+      setClimateRisk(result.success ? result : null);
+    } catch (e) {
+      console.error('Erreur calcul risque climatique:', e);
+      setClimateRisk(null);
+    } finally {
+      setLoadingRisk(false);
+    }
+  };
+
+  // Libellés et couleurs des classifications de risque
+  const DROUGHT_LABELS: { [key: string]: { label: string; color: string; level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null } } = {
+    secheresse_severe:  { label: 'Sécheresse sévère',  color: 'bg-red-100 text-red-800 border-red-300',       level: 'CRITICAL' },
+    secheresse_moderee: { label: 'Sécheresse modérée', color: 'bg-orange-100 text-orange-800 border-orange-300', level: 'HIGH' },
+    secheresse_legere:  { label: 'Sécheresse légère',  color: 'bg-amber-100 text-amber-800 border-amber-300', level: 'MEDIUM' },
+    normal:              { label: 'Pluviométrie normale', color: 'bg-green-100 text-green-800 border-green-300', level: null },
+    excedentaire:        { label: 'Pluviométrie excédentaire', color: 'bg-blue-100 text-blue-800 border-blue-300', level: null },
+    inconnu:             { label: 'Indéterminé', color: 'bg-gray-100 text-gray-600 border-gray-300', level: null },
+  };
+  const FLOOD_LABELS: { [key: string]: { label: string; color: string; level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null } } = {
+    inondation_critique: { label: 'Risque d\'inondation critique', color: 'bg-red-100 text-red-800 border-red-300', level: 'CRITICAL' },
+    inondation_elevee:   { label: 'Risque d\'inondation élevé', color: 'bg-orange-100 text-orange-800 border-orange-300', level: 'HIGH' },
+    inondation_moderee:  { label: 'Risque d\'inondation modéré', color: 'bg-amber-100 text-amber-800 border-amber-300', level: 'MEDIUM' },
+    normal:               { label: 'Pas de risque d\'inondation', color: 'bg-green-100 text-green-800 border-green-300', level: null },
+    inconnu:              { label: 'Indéterminé', color: 'bg-gray-100 text-gray-600 border-gray-300', level: null },
+  };
+
+  // Crée automatiquement une alerte (système existant DROUGHT/FLOOD) à partir du risque détecté
+  const handleCreateAutoAlert = async (kind: 'drought' | 'flood') => {
+    if (!climateRisk) return;
+    const fieldName = climateRisk.champ_nom || 'Parcelle';
+    let title = '', description = '', type = '', level: string | null = null;
+
+    if (kind === 'drought') {
+      const worst = (climateRisk.drought_30d?.pnp ?? 100) <= (climateRisk.drought_90d?.pnp ?? 100)
+        ? climateRisk.drought_30d : climateRisk.drought_90d;
+      const info = DROUGHT_LABELS[worst.classification];
+      level = info.level;
+      title = `${info.label} détectée — ${fieldName}`;
+      description = `Détection automatique (indice PNP, données CHIRPS) : cumul de pluie à ${worst.pnp}% de la normale historique (${worst.current_mm} mm reçus vs ${worst.historical_avg_mm} mm en moyenne sur ${climateRisk.years_history} ans).`;
+      type = 'DROUGHT';
+    } else {
+      const info = FLOOD_LABELS[climateRisk.flood_risk.level];
+      level = info.level;
+      title = `${info.label} — ${fieldName}`;
+      description = `Détection automatique (données CHIRPS) : cumul de pluie sur 5 jours de ${climateRisk.flood_risk.current_5d_mm} mm, contre ${climateRisk.flood_risk.historical_avg_5d_mm} mm en moyenne historique sur la même période.`;
+      type = 'FLOOD';
+    }
+
+    if (!level) return; // rien à créer si le niveau est normal
+
+    setCreatingAutoAlert(true);
+    try {
+      const res = await fetch('/api/admin/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title, description, type, level,
+          location: fieldName,
+          latitude: climateRisk.centroid?.lat,
+          longitude: climateRisk.centroid?.lon,
+        })
+      });
+      const result = await res.json();
+      if (result.success) {
+        alert('Alerte créée automatiquement dans le système !');
+      } else {
+        alert('Erreur: ' + result.error);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Erreur de connexion lors de la création de l\'alerte');
+    } finally {
+      setCreatingAutoAlert(false);
+    }
+  };
+
+  const handleSelectClimateField = (id: string) => {
+    setClimateFieldId(id);
+    if (id) {
+      fetchClimateIndex(id, climateIndexType);
+      fetchFieldClimate(id);
+      fetchFieldClimateRisk(id);
+    } else {
+      setClimateIndexData([]);
+      setClimatePrecipitation([]);
+      setClimateTemperature([]);
+      setClimateCentroid(null);
+      setForecast14([]);
+      setClimateRisk(null);
+    }
+  };
+
+  // Fusionne précipitations (série journalière complète) et indice choisi (série éparse,
+  // uniquement aux dates d'acquisition satellite) sur un même axe de dates, pour superposition.
+  const climateChartData = useMemo(() => {
+    const indexByDate: { [date: string]: number } = {};
+    climateIndexData.forEach((d: any) => { indexByDate[d.date] = d.ndvi; });
+    return climatePrecipitation.map((p: any) => ({
+      date: p.date,
+      precipitation: p.precipitation,
+      index: indexByDate[p.date] !== undefined ? indexByDate[p.date] : null
+    }));
+  }, [climatePrecipitation, climateIndexData]);
 
   const handleChartFieldClick = (data: any) => {
     if (data && data.activePayload && data.activePayload.length > 0) {
@@ -1574,7 +1786,7 @@ useEffect(() => {
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="flex space-x-8">
-          {[{ id: 'crops', label: 'Cultures' }, { id: 'weather', label: 'Météo' }, { id: 'recommendations', label: 'Recommandations' }, { id: 'calendar', label: 'Calendrier' }, { id: 'explorer', label: 'Observatoire' }].map((tab) => (
+          {[{ id: 'crops', label: 'Cultures' }, { id: 'weather', label: 'Météo' }, { id: 'recommendations', label: 'Recommandations' }, { id: 'calendar', label: 'Calendrier' }, { id: 'explorer', label: 'Observatoire' }, { id: 'fieldClimate', label: 'Temps' }].map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === tab.id ? 'border-green-600 text-green-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>{tab.label}</button>
           ))}
         </nav>
@@ -2368,6 +2580,230 @@ useEffect(() => {
                   {!loadingChart && viewMode === 'admin' && (!analysisConfig.zoneId || timeseriesData.length === 0) && (
                     <div className="h-32 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50">
                       <div className="text-center">Sélectionnez une zone pour voir l'évolution temporelle</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* ========== ONGLET "TEMPS" ========== */}
+      {activeTab === 'fieldClimate' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1 flex items-center">
+              <CloudRain className="w-5 h-5 mr-2 text-blue-600" />
+              Temps : Précipitations, Température &amp; Prévision 14 jours
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Précipitations journalières (CHIRPS) et température (ERA5-Land) superposées à l'évolution de l'indice spectral choisi, plus la prévision à 14 jours pour la parcelle.
+            </p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Parcelle</label>
+                <select
+                  value={climateFieldId}
+                  onChange={(e) => handleSelectClimateField(e.target.value)}
+                  className="w-full text-sm border-gray-300 rounded bg-white"
+                >
+                  <option value="">-- Sélectionner un champ --</option>
+                  {userFields.map((f: any) => (
+                    <option key={f.id} value={f.id}>{f.properties.nom} ({f.properties.proprietaire})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="lg:col-span-3">
+                <IndexSelector value={climateIndexType} onChange={(v: any) => setClimateIndexType(v)} />
+              </div>
+            </div>
+
+            {!climateFieldId && (
+              <div className="h-32 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50">
+                <div className="text-center">Sélectionnez une parcelle pour voir précipitations, température et prévision</div>
+              </div>
+            )}
+
+            {climateFieldId && (loadingClimate || loadingClimateIndex) && (
+              <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed">
+                <div className="text-center">
+                  <RefreshCw className="w-8 h-8 text-blue-600 mx-auto animate-spin mb-2" />
+                  <p className="text-sm text-gray-600">Chargement des données climatiques...</p>
+                </div>
+              </div>
+            )}
+
+            {climateFieldId && !loadingClimate && !loadingClimateIndex && (
+              <div className="space-y-6">
+                {/* ========== DÉTECTION AUTOMATIQUE SÉCHERESSE / INONDATION (PNP sur CHIRPS) ========== */}
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2 text-sm flex items-center">
+                    <ShieldAlert className="w-4 h-4 mr-2 text-orange-600" />
+                    Détection automatique du risque (indice PNP, CHIRPS)
+                  </h4>
+                  {loadingRisk ? (
+                    <div className="h-20 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed">
+                      <RefreshCw className="w-5 h-5 text-orange-600 animate-spin" />
+                    </div>
+                  ) : climateRisk ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {['drought_30d', 'drought_90d'].map((key) => {
+                        const d = climateRisk[key];
+                        const info = DROUGHT_LABELS[d.classification] || DROUGHT_LABELS.inconnu;
+                        return (
+                          <div key={key} className={`p-3 rounded-lg border ${info.color}`}>
+                            <p className="text-[10px] font-semibold uppercase opacity-70">{key === 'drought_30d' ? 'Sécheresse — 30 jours' : 'Sécheresse — 90 jours'}</p>
+                            <p className="text-sm font-bold mt-0.5">{info.label}</p>
+                            <p className="text-[11px] mt-1 opacity-80">
+                              {d.pnp !== null ? `${d.pnp}% de la normale (${d.current_mm} mm vs ${d.historical_avg_mm} mm sur ${climateRisk.years_history} ans)` : 'Données insuffisantes'}
+                            </p>
+                            {info.level && (
+                              <button
+                                onClick={() => handleCreateAutoAlert('drought')}
+                                disabled={creatingAutoAlert}
+                                className="mt-2 text-[11px] font-semibold underline hover:no-underline disabled:opacity-50"
+                              >
+                                Créer une alerte automatique
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {(() => {
+                        const info = FLOOD_LABELS[climateRisk.flood_risk.level] || FLOOD_LABELS.inconnu;
+                        return (
+                          <div className={`p-3 rounded-lg border ${info.color}`}>
+                            <p className="text-[10px] font-semibold uppercase opacity-70">Inondation — 5 jours</p>
+                            <p className="text-sm font-bold mt-0.5">{info.label}</p>
+                            <p className="text-[11px] mt-1 opacity-80">
+                              {climateRisk.flood_risk.current_5d_mm !== null
+                                ? `${climateRisk.flood_risk.current_5d_mm} mm reçus (moyenne historique : ${climateRisk.flood_risk.historical_avg_5d_mm} mm)`
+                                : 'Données insuffisantes'}
+                            </p>
+                            {info.level && (
+                              <button
+                                onClick={() => handleCreateAutoAlert('flood')}
+                                disabled={creatingAutoAlert}
+                                className="mt-2 text-[11px] font-semibold underline hover:no-underline disabled:opacity-50"
+                              >
+                                Créer une alerte automatique
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="h-16 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50 text-xs">
+                      Risque non calculable pour cette parcelle
+                    </div>
+                  )}
+                </div>
+
+                {/* Graphique combiné : indice spectral + précipitations journalières */}
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2 text-sm flex items-center">
+                    <TrendingUp className="w-4 h-4 mr-2 text-green-600" />
+                    {climateIndexType.toUpperCase()} superposé aux précipitations journalières (CHIRPS)
+                  </h4>
+                  {climateChartData.length > 0 ? (
+                    <div className="h-80 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={climateChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9 }} minTickGap={20} />
+                          <YAxis yAxisId="left" domain={[0, 1]} label={{ value: climateIndexType.toUpperCase(), angle: -90, position: 'insideLeft' }} />
+                          <YAxis yAxisId="right" orientation="right" label={{ value: 'Pluie (mm)', angle: 90, position: 'insideRight' }} />
+                          <Tooltip />
+                          <Legend />
+                          <Bar yAxisId="right" dataKey="precipitation" name="Précipitations (mm)" fill="#60a5fa" barSize={4} opacity={0.7} />
+                          <Line yAxisId="left" type="monotone" dataKey="index" name={climateIndexType.toUpperCase()} stroke="#16a34a" strokeWidth={2} dot={{ r: 3, fill: '#16a34a' }} connectNulls={false} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="h-32 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50">
+                      <div className="text-center">Aucune donnée de précipitation disponible pour cette parcelle</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Graphique température journalière */}
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2 text-sm flex items-center">
+                    <Thermometer className="w-4 h-4 mr-2 text-red-500" />
+                    Température journalière (ERA5-Land)
+                  </h4>
+                  {climateTemperature.length > 0 ? (
+                    <div className="h-64 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={climateTemperature}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9 }} minTickGap={20} />
+                          <YAxis label={{ value: '°C', angle: -90, position: 'insideLeft' }} />
+                          <Tooltip />
+                          <Legend />
+                          <Line type="monotone" dataKey="t_max" name="T° max" stroke="#ef4444" strokeWidth={1.5} dot={false} />
+                          <Line type="monotone" dataKey="t_mean" name="T° moyenne" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+                          <Line type="monotone" dataKey="t_min" name="T° min" stroke="#3b82f6" strokeWidth={1.5} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="h-24 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50">
+                      <div className="text-center">Aucune donnée de température disponible pour cette parcelle</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Prévision 14 jours */}
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2 text-sm flex items-center">
+                    <Umbrella className="w-4 h-4 mr-2 text-blue-500" />
+                    Prévision à 14 jours
+                  </h4>
+                  {loadingForecast ? (
+                    <div className="h-32 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed">
+                      <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
+                    </div>
+                  ) : forecast14.length > 0 ? (
+                    <>
+                      <div className="h-56 w-full mb-3">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={forecast14}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="date" tick={{ fontSize: 9 }} />
+                            <YAxis yAxisId="left" label={{ value: '°C', angle: -90, position: 'insideLeft' }} />
+                            <YAxis yAxisId="right" orientation="right" label={{ value: 'Pluie (mm)', angle: 90, position: 'insideRight' }} />
+                            <Tooltip />
+                            <Legend />
+                            <Bar yAxisId="right" dataKey="precipitation" name="Pluie prévue (mm)" fill="#60a5fa" barSize={10} opacity={0.7} />
+                            <Line yAxisId="left" type="monotone" dataKey="tempMax" name="T° max" stroke="#ef4444" strokeWidth={2} dot={{ r: 2 }} />
+                            <Line yAxisId="left" type="monotone" dataKey="tempMin" name="T° min" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <div className="flex gap-2 pb-2" style={{ minWidth: 'max-content' }}>
+                          {forecast14.map((day: any) => (
+                            <div key={day.date} className="flex-shrink-0 w-24 bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                              <p className="text-[10px] text-gray-500">{day.date.slice(5)}</p>
+                              <p className="text-sm font-semibold text-gray-800">{day.tempMax ?? '-'}° / {day.tempMin ?? '-'}°</p>
+                              <p className="text-[10px] text-blue-600 flex items-center justify-center mt-1">
+                                <Droplets className="w-3 h-3 mr-0.5" />{day.precipitation ?? 0} mm
+                              </p>
+                              {day.precipProbability !== null && (
+                                <p className="text-[9px] text-gray-400">{day.precipProbability}% chance</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="h-24 flex items-center justify-center text-gray-400 border-2 border-dashed rounded-lg bg-gray-50">
+                      <div className="text-center">Prévision indisponible pour cette parcelle</div>
                     </div>
                   )}
                 </div>

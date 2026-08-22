@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import type { CarteTheematique, Domaine } from './types'
 import { CarteCard } from './CarteCard'
+import { CarteDetailModal } from './CarteDetailModal'
 import CarteFormDialog from './CarteFormDialog'
 import { cn } from '@/lib/utils'
 import { useLanguage } from '@/app/contexts/LanguageContext'
@@ -81,6 +82,10 @@ export function CartothequeView() {
   const [domaineFilter, setDomaineFilter] = useState<string>('tous')
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
+
+  // Modal détail
+  const [selectedCarte, setSelectedCarte] = useState<CarteTheematique | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
 
   // Formulaire de publication
   const [showForm, setShowForm] = useState(false)
@@ -150,7 +155,18 @@ export function CartothequeView() {
     return { total, gratuites, payantes }
   }, [cartes])
 
-  // Plus besoin de handleVoir — CarteCard navigue directement vers /carte/[id]
+  const handleVoir = async (carte: CarteTheematique) => {
+    try {
+      const res = await fetch(`/api/cartotheque/cartes/${carte.id}`)
+      const result = await res.json()
+      const detail = result.data || result
+      setSelectedCarte(detail)
+      setModalOpen(true)
+    } catch {
+      setSelectedCarte(carte)
+      setModalOpen(true)
+    }
+  }
 
   const clearFilters = () => {
     setSearch('')
@@ -395,7 +411,7 @@ export function CartothequeView() {
           )}
         >
           {cartes.map((c) => (
-            <CarteCard key={c.id} carte={c} />
+            <CarteCard key={c.id} carte={c} onVoir={handleVoir} />
           ))}
         </div>
       )}
@@ -422,6 +438,16 @@ export function CartothequeView() {
           </span>
         </div>
       )}
+
+      {/* Modal de détail agrandi */}
+      <CarteDetailModal
+        carte={selectedCarte}
+        open={modalOpen}
+        onOpenChange={(o) => {
+          setModalOpen(o)
+          if (!o) setSelectedCarte(null)
+        }}
+      />
 
       {/* Formulaire de publication */}
       {showForm && (
