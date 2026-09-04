@@ -3,6 +3,12 @@
 // ============================================================
 // CORRECTION : Remplacement de z-ai-web-dev-sdk par appel direct Groq API
 // Tout le reste (fetchers, intent, fallbacks) est inchangé.
+//
+// MAJ 27/08/2026 : Migration du modèle Groq vers 'openai/gpt-oss-120b'.
+// 'llama-3.3-70b-versatile' a été mis hors service par Groq le 16 août 2026
+// pour les comptes Free/Developer (réponse 404 "model_not_found").
+// Une chaîne de fallback automatique bascule sur un second modèle en cas de
+// future dépréciation, sans interruption du chatbot.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -662,40 +668,77 @@ Réponds TOUJOURS en français. Utilise des émojis. Sois concis et utile.`;
 }
 
 // ============================================================
-// ★★★ CORRECTION PRINCIPALE : Appel direct Groq au lieu de z-ai-web-dev-sdk ★★★
+// ★★★ Appel direct Groq (au lieu de z-ai-web-dev-sdk) ★★★
 // ============================================================
+
+// NOTE (27/08/2026) : Groq a décommissionné 'llama-3.3-70b-versatile'
+// (404 "model_not_found") pour les tiers Free/Developer au 16 août 2026.
+// Le remplacement officiellement recommandé par Groq est 'openai/gpt-oss-120b'.
+// Ordre de tentative : variable d'env OPENAI_MODEL (si définie), puis les
+// modèles connus. En cas de nouvelle dépréciation Groq, seule cette liste
+// devra être mise à jour.
+const FALLBACK_MODELS: string[] = [
+  process.env.OPENAI_MODEL || 'openai/gpt-oss-120b',   // paramétrable via .env.local
+  'openai/gpt-oss-120b',                               // remplacement recommandé par Groq
+  'qwen/qwen3.6-27b',                                  // alternative en cas de dépréciation
+];
 
 async function callGroqLLM(messages: Array<{ role: ChatRole; content: string }>): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1';
-  const model = process.env.OPENAI_MODEL || 'llama-3-3-70b-versatile';
 
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY non configurée dans .env.local');
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.7,
-      max_tokens: 1024,
-    }),
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error(`[Chatbot] Groq API error (${response.status}):`, errText);
-    throw new Error(`Groq API error: ${response.status}`);
+  // Tente chaque modèle dans l'ordre. Un échec lié au modèle lui-même
+  // (déprécié, inexistant, 429 spécifique au modèle, erreur serveur Groq)
+  // provoque le passage automatique au modèle suivant. Les erreurs
+  // d'authentification (401/403) arrêtent immédiatement la boucle :
+  // aucune clé invalide ne sera réparée en changeant de modèle.
+  for (const model of [...new Set(FALLBACK_MODELS)]) {
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.7,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        // Erreur complète de Groq systématiquement loggée (status + corps),
+        // y compris en production, pour diagnostiquer rapidement les futurs
+        // incidents (modèle renommé, quota, clé invalide, etc.)
+        console.error(`[Chatbot] Groq API error (${response.status}) model="${model}":`, errText);
+        lastError = new Error(`Groq API error: ${response.status} - ${errText.substring(0, 300)}`);
+        if (response.status === 401 || response.status === 403) {
+          throw lastError; // problème de clé -> inutile d'essayer un autre modèle
+        }
+        continue; // modèle indisponible -> essaie le suivant
+      }
+
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || '';
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Groq API error: 401')
+          || err instanceof Error && err.message.startsWith('Groq API error: 403')) {
+        throw err;
+      }
+      lastError = err instanceof Error ? err : lastError;
+    }
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
+  throw lastError || new Error('Aucun modèle Groq disponible');
 }
 
 // ============================================================
@@ -709,6 +752,7 @@ export async function GET() {
     version: '2.0.0',
     status: 'operational',
     llm: 'groq',
+    model: process.env.OPENAI_MODEL || 'openai/gpt-oss-120b',
   });
 }
 
@@ -767,8 +811,9 @@ export async function POST(request: NextRequest) {
     }
     augmentedMessage += `\n\n[Intent: ${intent}]`;
 
-    // ★★★ 4) Appeler Groq directement (CORRECTION) ★★★
+    // ★★★ 4) Appeler Groq directement ★★★
     let aiResponse: string;
+    let llmErrorMessage: string | undefined;
     try {
       // Construire les messages pour Groq : système + historique + message augmenté
       const currentHistory = conversations.get(sessionId)!;
@@ -782,8 +827,9 @@ export async function POST(request: NextRequest) {
       if (!aiResponse) {
         aiResponse = getFallbackResponse(sanitizedMessage, intent);
       }
-    } catch (llmError) {
+    } catch (llmError: any) {
       console.error('[Chatbot] LLM error, using fallback:', llmError);
+      llmErrorMessage = llmError?.message;
       aiResponse = getFallbackResponse(sanitizedMessage, intent);
     }
 
@@ -797,6 +843,8 @@ export async function POST(request: NextRequest) {
       intent,
       category: mapIntentToCategory(intent),
       hasLiveData: !!liveDataContext && liveDataContext.length > 0,
+      // Visible seulement en dev, pour diagnostiquer sans avoir à ouvrir les logs serveur
+      ...(process.env.NODE_ENV === 'development' && llmErrorMessage ? { debugLlmError: llmErrorMessage } : {}),
     });
   } catch (error: any) {
     console.error('[Chatbot] API error:', error);
