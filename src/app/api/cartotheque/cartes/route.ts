@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get('content-type') || ''
+  const authorization = request.headers.get('authorization')
 
   try {
     let djangoResponse: Response
@@ -64,13 +65,17 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData()
       djangoResponse = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/`, {
         method: 'POST',
+        headers: authorization ? { Authorization: authorization } : undefined,
         body: formData,
       })
     } else {
       const body = await request.json()
       djangoResponse = await fetch(`${DJANGO_API_URL}/api/cartotheque/cartes/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authorization ? { Authorization: authorization } : {}),
+        },
         body: JSON.stringify(body),
       })
     }

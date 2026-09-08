@@ -1,20 +1,21 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { AlertTriangle, TrendingUp, Map, Building, Droplets, ThermometerSun, Waves, Home as HomeIcon, Users, Activity, Zap, TreePine, Trophy, Bell, Menu, X, Search, Filter, ChevronRight, MapPin, AlertCircle, CheckCircle, Settings, BookOpen, MapPinned } from 'lucide-react'
-
+import { AlertTriangle, TrendingUp, Map, Layers, Building, Droplets, ThermometerSun, Waves, Home as HomeIcon, Users, Activity, Zap, TreePine, Trophy, Bell, Menu, X, Search, Filter, ChevronRight, MapPin, AlertCircle, CheckCircle, Settings } from 'lucide-react'
 import GeoPortal from '@/components/geoportal/GeoPortal'
 import CommunalManagement from '@/components/communal/CommunalManagement'
 import InfrastructureManagement from '@/components/infrastructure/InfrastructureManagement'
 import AgricultureManagement from '@/components/agriculture/AgricultureManagement'
+import { CartothequeView } from '@/components/cartotheque/CartothequeView'
 import AdminPanel from '@/components/admin/AdminPanel'
 import LanguageSelector from '@/components/LanguageSelector'
 import Chatbot from '@/components/Chatbot'
 import { useLanguage } from '@/app/contexts/LanguageContext'
-import CartothequeView from '@/components/cartotheque/CartothequeView'
+import { useAuth } from '@/app/contexts/AuthContext'
 
 export default function CommuneApp() {
   const { t, language } = useLanguage()
+  const { user, loading: authLoading, isAdmin, logout } = useAuth()
   const [activeSection, setActiveSection] = useState('dashboard')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [alerts, setAlerts] = useState([])
@@ -87,18 +88,28 @@ export default function CommuneApp() {
     fetchData()
   }, [])
 
+  useEffect(() => {
+    if (!authLoading && !user) window.location.replace('/login')
+  }, [authLoading, user])
+
+  if (authLoading || !user) {
+    return <div className="min-h-screen flex items-center justify-center bg-green-50"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" /></div>
+  }
+
   // Menu items avec traductions
   const menuItems = [
     { id: 'dashboard', label: t('menu.dashboard'), icon: HomeIcon },
     { id: 'alerts', label: t('menu.alerts'), icon: Bell },
     { id: 'geoportal', label: t('menu.geoportal'), icon: Map },
-    { id: 'cartotheque', label: t('menu.cartotheque'), icon: MapPinned },
+    { id: 'cartotheque', label: 'Cartothèque', icon: Layers },
     { id: 'infrastructures', label: t('menu.infrastructures'), icon: Building },
     { id: 'agriculture', label: t('menu.agriculture'), icon: TreePine },
     { id: 'water', label: t('menu.water'), icon: Droplets },
     { id: 'sports', label: t('menu.sports'), icon: Trophy },
-    { id: 'admin', label: t('menu.admin'), icon: Settings },
-    { id: 'admin-panel', label: t('menu.adminPanel'), icon: Settings }
+    ...(isAdmin ? [
+      { id: 'admin', label: t('menu.admin'), icon: Settings },
+      { id: 'admin-panel', label: t('menu.adminPanel'), icon: Settings },
+    ] : []),
   ]
 
   const getAlertColor = (level: string) => {
@@ -152,6 +163,11 @@ export default function CommuneApp() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <div className="hidden md:block text-right">
+                <p className="text-sm font-medium text-gray-800">{user.first_name || user.username}</p>
+                <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+              </div>
+              <button onClick={logout} className="hidden md:block text-sm text-gray-600 hover:text-red-600">Déconnexion</button>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <input
@@ -500,7 +516,7 @@ export default function CommuneApp() {
           {/* Geoportal Section */}
           {activeSection === 'geoportal' && <GeoPortal />}
 
-          {/* Cartothèque Section — composant mis à jour */}
+          {/* Cartothèque Section */}
           {activeSection === 'cartotheque' && <CartothequeView />}
         </main>
       </div>
@@ -546,7 +562,7 @@ export default function CommuneApp() {
         </div>
       </footer>
 
-      {/* Chatbot avec alertes et données météo */}
+      {/* Après : On passe l'état 'alerts' ET 'weatherData' au chatbot */}
       <Chatbot alerts={alerts} weatherData={weatherData} />
     </div>
   )

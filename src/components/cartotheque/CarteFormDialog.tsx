@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select'
 import { Loader2, Upload, Link, Layers } from 'lucide-react'
 import { useLanguage } from '@/app/contexts/LanguageContext'
+import { useAuth } from '@/app/contexts/AuthContext'
 
 // Couches du géoportail disponibles
 const GEO_LAYERS = [
@@ -46,6 +47,7 @@ interface CarteFormDialogProps {
 
 export default function CarteFormDialog({ domaines, onSuccess, onCancel }: CarteFormDialogProps) {
   const { t } = useLanguage()
+  const { token } = useAuth()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -111,6 +113,7 @@ export default function CarteFormDialog({ domaines, onSuccess, onCancel }: Carte
 
       const res = await fetch('/api/cartotheque/cartes', {
         method: 'POST',
+        headers: token ? { Authorization: `Token ${token}` } : undefined,
         body: formData,
       })
 

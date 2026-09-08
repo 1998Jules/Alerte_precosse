@@ -1,5 +1,5 @@
 // src/app/api/weather/field-forecast/route.ts
-// Prévision météo à 14 jours pour un champ (lat/lon = centroïde du champ).
+// Prévision météo à 15 jours pour un champ (lat/lon = centroïde du champ).
 // Utilise Open-Meteo (gratuit, sans clé API, jusqu'à 16 jours de prévision).
 import { NextResponse } from 'next/server'
 
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       `https://api.open-meteo.com/v1/forecast` +
       `?latitude=${lat}&longitude=${lon}` +
       `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,et0_fao_evapotranspiration` +
-      `&timezone=auto&forecast_days=14`
+      `&timezone=auto&forecast_days=15`
 
     const response = await fetch(url, { cache: 'no-store' })
 
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error('Erreur Open-Meteo (field-forecast):', error)
     return NextResponse.json(
-      { success: false, error: 'Impossible de récupérer la prévision météo à 14 jours' },
+      { success: false, error: 'Impossible de récupérer la prévision météo à 15 jours' },
       { status: 500 }
     )
   }

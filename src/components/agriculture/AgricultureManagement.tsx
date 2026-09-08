@@ -18,6 +18,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import 'leaflet/dist/leaflet.css'
 import Chatbot from '../Chatbot'
 import DroughtIndicesPanel from './DroughtIndicesPanel'
+ import { useAuth } from '@/app/contexts/AuthContext'
 
 // ========== CONFIGURATION DES VARIÉTÉS ==========
 const CROP_VARIETIES_CONFIG: { [key: string]: { name: string; duration: number }[] } = {
@@ -635,6 +636,11 @@ const GlobalAlertBanner = ({ anomalies, indexLabel }: { anomalies: IndexAnomaly[
 function AddFieldModal({ onClose, onSave }: { onClose: () => void, onSave: () => void }) {
   const [formData, setFormData] = useState({ nom: '', proprietaire: '', type_culture: '', date_semi: '' })
   const [drawnGeometry, setDrawnGeometry] = useState<any>(null)
+ 
+
+// dans AgricultureManagement et AddFieldModal
+const { token } = useAuth()
+const getAuthHeaders = () => token ? { Authorization: `Token ${token}` } : {};
 
   const _onCreated = (e: any) => {
     const layer = e.layer;
@@ -648,10 +654,14 @@ function AddFieldModal({ onClose, onSave }: { onClose: () => void, onSave: () =>
     const payload = { ...formData, geom: drawnGeometry };
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/champs/create/', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        credentials: 'include',
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify(payload)
       });
       if (res.ok) { alert("Champ ajouté avec succès !"); onSave(); onClose(); }
-      else { alert("Erreur lors de l'ajout du champ"); }
+      else {
+        const error = await res.json().catch(() => ({}));
+        alert(error.error || "Session expirée : veuillez vous reconnecter avant de créer un champ.");
+      }
     } catch (err) { console.error(err); alert("Erreur de connexion au serveur"); }
   };
 
@@ -899,6 +909,8 @@ function RegionWeatherMarkers({ regions }: { regions: RegionWeatherData[] }) {
 // ========== Composant Principal ==========
 export default function AgricultureManagement() {
   const OPENWEATHER_API_KEY='947f9f56349e37e86784c5f031cda332'; 
+  const { token } = useAuth()
+const getAuthHeaders = () => token ? { Authorization: `Token ${token}` } : {};
 
   const [activeTab, setActiveTab] = useState('crops')
   const [selectedCrop, setSelectedCrop] = useState<Crop | null>(null)
@@ -1019,9 +1031,6 @@ export default function AgricultureManagement() {
   const [climateTemperature, setClimateTemperature] = useState<any[]>([]);
   const [climateCentroid, setClimateCentroid] = useState<{ lat: number; lon: number } | null>(null);
   const [loadingClimate, setLoadingClimate] = useState(false);
-  const [climateIndexType, setClimateIndexType] = useState<'ndvi' | 'evi' | 'ndwi' | 'msavi'>('ndvi');
-  const [climateIndexData, setClimateIndexData] = useState<any[]>([]);
-  const [loadingClimateIndex, setLoadingClimateIndex] = useState(false);
   const [forecast14, setForecast14] = useState<any[]>([]);
   const [loadingForecast, setLoadingForecast] = useState(false);
 
@@ -1030,11 +1039,11 @@ export default function AgricultureManagement() {
   const [loadingRisk, setLoadingRisk] = useState(false);
   const [creatingAutoAlert, setCreatingAutoAlert] = useState(false);
 
-  // ========== ÉTATS : SUIVI TEMPS RÉEL (GPM IMERG) ==========
+  // ========== ÉTATS : PLUIE CHIRPS-GEFS (BLOC MAINTENANT) ==========
   const [climateRealtime, setClimateRealtime] = useState<any>(null);
   const [climateRealtimeStatus, setClimateRealtimeStatus] = useState<any>(null);
   const [forecastRisk, setForecastRisk] = useState<any>(null);
-  const [forecastDays] = useState<number>(14);
+  const [forecastDays] = useState<number>(15);
 
   // ========== ÉTATS : ANOMALIES D'INDICES ==========
   const [fieldAnomalies, setFieldAnomalies] = useState<IndexAnomaly[]>([]);
@@ -1175,13 +1184,6 @@ export default function AgricultureManagement() {
     }
   }, [selectedIndexType, compareMode]);
 
-  // 5. Onglet "Temps" : rafraîchir la série d'indice superposée quand elle change
-  useEffect(() => {
-    if (climateFieldId) {
-      fetchClimateIndex(climateFieldId, climateIndexType);
-    }
-  }, [climateIndexType]);
-  
   const [regionWeather, setRegionWeather] = useState<RegionWeatherData[]>([])
 
   useEffect(() => {
@@ -1242,7 +1244,7 @@ export default function AgricultureManagement() {
 
   const fetchUserFields = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/agriculture/api/champs/geojson/');
+      const res = await fetch('http://127.0.0.1:8000/agriculture/api/champs/geojson/', { credentials: 'include', headers: getAuthHeaders() });
       if (res.ok) setUserFields((await res.json()).features || []);
     } catch (e) { console.error(e); }
   }
@@ -1256,8 +1258,9 @@ export default function AgricultureManagement() {
     setFieldMapUrl(null);
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-ndvi/', {
+        credentials: 'include',
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, 
         body: JSON.stringify({ 
           champ_id: id,
           index_type: selectedIndexType
@@ -1275,32 +1278,15 @@ export default function AgricultureManagement() {
 
   // ========== ONGLET "TEMPS" : FONCTIONS ==========
 
-  const fetchClimateIndex = async (champId: string, indexType: string) => {
-    setLoadingClimateIndex(true);
-    try {
-      const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-ndvi/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ champ_id: champId, index_type: indexType })
-      });
-      const result = await res.json();
-      setClimateIndexData(result.success ? (result.data || []) : []);
-    } catch (e) {
-      console.error('Erreur récupération indice (Temps):', e);
-      setClimateIndexData([]);
-    } finally {
-      setLoadingClimateIndex(false);
-    }
-  };
-
   const fetchFieldClimate = async (champId: string) => {
     if (!champId) return;
     setLoadingClimate(true);
     setForecast14([]);
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-climate/', {
+        credentials: 'include',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ champ_id: champId })
       });
       const result = await res.json();
@@ -1308,6 +1294,15 @@ export default function AgricultureManagement() {
         setClimatePrecipitation(result.precipitation || []);
         setClimateTemperature(result.temperature || []);
         setClimateCentroid(result.centroid || null);
+        // field-climate contient déjà les SPI observés 30/90 jours et le SPI
+        // prévisionnel. On les conserve immédiatement, même si l'appel
+        // complémentaire temps réel (GPM) échoue ou prend plus de temps.
+        setClimateRealtimeStatus((previous: any) => ({
+          ...(previous || {}),
+          ...result,
+          spi_observe: result.spi_observe || previous?.spi_observe,
+          spi_previsionnel: result.spi_previsionnel || previous?.spi_previsionnel,
+        }));
 
         if (result.centroid?.lat && result.centroid?.lon) {
           fetchForecast14(result.centroid.lat, result.centroid.lon);
@@ -1344,8 +1339,9 @@ export default function AgricultureManagement() {
     setLoadingRisk(true);
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-climate-risk/', {
+        credentials: 'include',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ champ_id: champId })
       });
       const result = await res.json();
@@ -1363,13 +1359,15 @@ export default function AgricultureManagement() {
     if (!champId) return;
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-realtime-status/', {
+        credentials: 'include',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ champ_id: champId, forecast_days: 14 })
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ champ_id: champId, forecast_days: 15 })
       });
       const result = await res.json();
       if (result.success) {
-        setClimateRealtimeStatus(result);
+        // Fusionner pour ne pas perdre les SPI déjà chargés par field-climate.
+        setClimateRealtimeStatus((previous: any) => ({ ...(previous || {}), ...result }));
         setClimateRealtime(result.maintenant);
         setForecastRisk(result.a_venir);
       } else {
@@ -1417,7 +1415,7 @@ export default function AgricultureManagement() {
       const info = FLOOD_LABELS[levelKey] || FLOOD_LABELS.inconnu;
       level = info.level;
       title = `${info.label} — ${fieldName}`;
-      description = `Détection automatique (GPM IMERG / CHIRPS) : ${floodData?.total_24h_mm || floodData?.current_5d_mm || '?'} mm reçus récemment.`;
+      description = `Détection automatique (CHIRPS3-GEFS) : ${floodData?.total_24h_mm || floodData?.current_5d_mm || '?'} mm prévus sur la prochaine journée.`;
       type = 'FLOOD';
     }
 
@@ -1456,12 +1454,10 @@ export default function AgricultureManagement() {
     setForecastRisk(null);
     
     if (id) {
-      fetchClimateIndex(id, climateIndexType);
       fetchFieldClimate(id);
       fetchFieldClimateRisk(id);
       fetchFieldRealtimeStatus(id);
     } else {
-      setClimateIndexData([]);
       setClimatePrecipitation([]);
       setClimateTemperature([]);
       setClimateCentroid(null);
@@ -1469,16 +1465,6 @@ export default function AgricultureManagement() {
       setClimateRisk(null);
     }
   };
-
-  const climateChartData = useMemo(() => {
-    const indexByDate: { [date: string]: number } = {};
-    climateIndexData.forEach((d: any) => { indexByDate[d.date] = d.ndvi; });
-    return climatePrecipitation.map((p: any) => ({
-      date: p.date,
-      precipitation: p.precipitation,
-      index: indexByDate[p.date] !== undefined ? indexByDate[p.date] : null
-    }));
-  }, [climatePrecipitation, climateIndexData]);
 
   const handleChartFieldClick = (data: any) => {
     if (data && data.activePayload && data.activePayload.length > 0) {
@@ -1502,8 +1488,9 @@ export default function AgricultureManagement() {
     setLoadingComparison(true);
     try {
       const res = await fetch('http://127.0.0.1:8000/agriculture/api/field-indices-comparison/', {
+        credentials: 'include',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ champ_id: fieldId, indices })
       });
       const result = await res.json();
@@ -2563,9 +2550,6 @@ export default function AgricultureManagement() {
                   ))}
                 </select>
               </div>
-              <div className="lg:col-span-3">
-                <IndexSelector value={climateIndexType} onChange={(v: any) => setClimateIndexType(v)} />
-              </div>
             </div>
 
             {!climateFieldId && (
@@ -2574,7 +2558,7 @@ export default function AgricultureManagement() {
               </div>
             )}
 
-            {climateFieldId && (loadingClimate || loadingClimateIndex || loadingRisk) && (
+            {climateFieldId && (loadingClimate || loadingRisk) && (
               <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed">
                 <div className="text-center">
                   <RefreshCw className="w-8 h-8 text-blue-600 mx-auto animate-spin mb-2" />
@@ -2583,17 +2567,17 @@ export default function AgricultureManagement() {
               </div>
             )}
 
-            {climateFieldId && !loadingClimate && !loadingClimateIndex && !loadingRisk && (
+            {climateFieldId && !loadingClimate && !loadingRisk && (
               <div className="space-y-6">
                 
-                {/* ====== 1. BLOC "MAINTENANT" - GPM IMERG TEMPS RÉEL ====== */}
+                {/* ====== 1. BLOC "MAINTENANT" - CHIRPS3-GEFS ====== */}
                 <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
                   <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-cyan-50 border-b flex items-center justify-between">
                     <h4 className="font-bold text-gray-800 flex items-center">
                       <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></span>
-                      Maintenant : Pluie quasi temps réel
+                      Maintenant : Pluie CHIRPS-GEFS
                     </h4>
-                    <span className="text-xs text-gray-500">GPM IMERG (NASA) • Latence ~4h</span>
+                    <span className="text-xs text-gray-500">CHIRPS3-GEFS • Prévision quotidienne à 72h</span>
                   </div>
                   <div className="p-4">
                     {climateRealtime ? (
@@ -2646,117 +2630,74 @@ export default function AgricultureManagement() {
                   </div>
                 </div>
 
-                {/* ====== 2. BLOC "TENDANCE RÉCENTE" - CHIRPS PNP 30j/90j ====== */}
+                {/* ====== 2. BLOC "TENDANCE RÉCENTE" - SPI OBSERVÉ 30j/90j ====== */}
                 <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
                   <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-orange-50 border-b flex items-center justify-between">
                     <h4 className="font-bold text-gray-800 flex items-center">
                       <TrendingUp className="w-4 h-4 mr-2 text-orange-500" />
                       Tendance récente : Risque sécheresse
                     </h4>
-                    <span className="text-xs text-gray-500">CHIRPS • Climatologie {climateRisk?.years_history || 10} ans</span>
+                    <span className="text-xs text-gray-500">SPI observé • CHIRPS • Climatologie {climateRealtimeStatus?.spi_observe?.['30']?.historical_years || climateRisk?.years_history || 10} ans</span>
                   </div>
                   <div className="p-4">
-                    {climateRisk ? (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className={`p-3 rounded-lg border ${
-                          climateRisk.drought_30d?.classification === 'secheresse_severe' ? 'bg-red-100 border-red-400' :
-                          climateRisk.drought_30d?.classification === 'secheresse_moderee' ? 'bg-orange-100 border-orange-400' :
-                          climateRisk.drought_30d?.classification === 'secheresse_legere' ? 'bg-amber-100 border-amber-400' :
-                          'bg-green-100 border-green-400'
-                        }`}>
-                          <p className="text-xs font-bold uppercase opacity-70">PNP 30 jours</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <span className="text-xl font-bold">
-                              {climateRisk.drought_30d?.pnp !== null ? `${climateRisk.drought_30d?.pnp}%` : 'N/A'}
-                            </span>
-                            <span className="text-sm">
-                              {climateRisk.drought_30d?.classification === 'secheresse_severe' && '🚨 Sécheresse sévère'}
-                              {climateRisk.drought_30d?.classification === 'secheresse_moderee' && '⚠️ Sécheresse modérée'}
-                              {climateRisk.drought_30d?.classification === 'secheresse_legere' && '⚡ Sécheresse légère'}
-                              {climateRisk.drought_30d?.classification === 'normal' && '✅ Normal'}
-                              {climateRisk.drought_30d?.classification === 'excedentaire' && '💧 Excédentaire'}
-                              {climateRisk.drought_30d?.classification === 'inconnu' && '❓ Indéterminé'}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs text-gray-600">
-                            {climateRisk.drought_30d?.current_mm} mm reçus vs {climateRisk.drought_30d?.historical_avg_mm} mm (moy. hist.)
-                          </div>
-                        </div>
-
-                        <div className={`p-3 rounded-lg border ${
-                          climateRisk.drought_90d?.classification === 'secheresse_severe' ? 'bg-red-100 border-red-400' :
-                          climateRisk.drought_90d?.classification === 'secheresse_moderee' ? 'bg-orange-100 border-orange-400' :
-                          climateRisk.drought_90d?.classification === 'secheresse_legere' ? 'bg-amber-100 border-amber-400' :
-                          'bg-green-100 border-green-400'
-                        }`}>
-                          <p className="text-xs font-bold uppercase opacity-70">PNP 90 jours</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <span className="text-xl font-bold">
-                              {climateRisk.drought_90d?.pnp !== null ? `${climateRisk.drought_90d?.pnp}%` : 'N/A'}
-                            </span>
-                            <span className="text-sm">
-                              {climateRisk.drought_90d?.classification === 'secheresse_severe' && '🚨 Sécheresse sévère'}
-                              {climateRisk.drought_90d?.classification === 'secheresse_moderee' && '⚠️ Sécheresse modérée'}
-                              {climateRisk.drought_90d?.classification === 'secheresse_legere' && '⚡ Sécheresse légère'}
-                              {climateRisk.drought_90d?.classification === 'normal' && '✅ Normal'}
-                              {climateRisk.drought_90d?.classification === 'excedentaire' && '💧 Excédentaire'}
-                              {climateRisk.drought_90d?.classification === 'inconnu' && '❓ Indéterminé'}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs text-gray-600">
-                            {climateRisk.drought_90d?.current_mm} mm reçus vs {climateRisk.drought_90d?.historical_avg_mm} mm (moy. hist.)
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-lg border bg-gray-50 border-gray-300">
-                          <p className="text-xs font-bold uppercase opacity-70">Synthèse</p>
-                          <div className="mt-1 space-y-1 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span>Sécheresse 30j :</span>
-                              <span className={`font-bold ${
-                                ['secheresse_severe', 'secheresse_moderee', 'secheresse_legere'].includes(climateRisk.drought_30d?.classification) 
-                                  ? 'text-red-600' 
-                                  : 'text-green-600'
-                              }`}>
-                                {climateRisk.drought_30d?.classification === 'secheresse_severe' && '🚨 Critique'}
-                                {climateRisk.drought_30d?.classification === 'secheresse_moderee' && '⚠️ Élevé'}
-                                {climateRisk.drought_30d?.classification === 'secheresse_legere' && '⚡ Modéré'}
-                                {climateRisk.drought_30d?.classification === 'normal' && '✅ Normal'}
-                                {climateRisk.drought_30d?.classification === 'excedentaire' && '💧 Excédentaire'}
-                                {climateRisk.drought_30d?.classification === 'inconnu' && '❓ N/A'}
-                              </span>
+                    {(() => {
+                      const spi30 = climateRealtimeStatus?.spi_observe?.['30'];
+                      const spi90 = climateRealtimeStatus?.spi_observe?.['90'];
+                      const spiCards = [
+                        { key: '30', label: 'SPI 30 jours', data: spi30 },
+                        { key: '90', label: 'SPI 90 jours', data: spi90 },
+                      ];
+                      const getSpiLabel = (alert: string | undefined) => ({
+                        secheresse_extreme: 'Sécheresse extrême',
+                        secheresse_severe: 'Sécheresse sévère',
+                        secheresse_moderee: 'Sécheresse modérée',
+                        normal: 'Normal',
+                        humide: 'Humide',
+                        tres_humide: 'Très humide',
+                        inconnu: 'Indéterminé',
+                      } as Record<string, string>)[alert || 'inconnu'] || 'Indéterminé';
+                      const getSpiStyle = (alert: string | undefined) =>
+                        alert === 'secheresse_extreme' ? 'bg-red-100 border-red-500 text-red-800' :
+                        alert === 'secheresse_severe' ? 'bg-red-50 border-red-400 text-red-700' :
+                        alert === 'secheresse_moderee' ? 'bg-orange-100 border-orange-400 text-orange-800' :
+                        alert === 'normal' ? 'bg-green-100 border-green-400 text-green-800' :
+                        alert === 'humide' || alert === 'tres_humide' ? 'bg-blue-100 border-blue-400 text-blue-800' :
+                        'bg-gray-100 border-gray-300 text-gray-700';
+                      return spi30 || spi90 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {spiCards.map(({ key, label, data }) => (
+                            <div key={key} className={`p-4 rounded-lg border-2 ${getSpiStyle(data?.alert)}`}>
+                              <p className="text-xs font-bold uppercase opacity-70">{label}</p>
+                              <div className="flex items-end justify-between mt-2">
+                                <span className="text-3xl font-bold">{data?.spi ?? 'N/A'}</span>
+                                <span className="text-sm font-semibold text-right">{getSpiLabel(data?.alert)}</span>
+                              </div>
+                              <p className="mt-2 text-xs opacity-80">
+                                {data?.current_mm ?? 'N/A'} mm observés • moyenne historique {data?.historical_mean_mm ?? 'N/A'} mm
+                              </p>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span>Sécheresse 90j :</span>
-                              <span className={`font-bold ${
-                                ['secheresse_severe', 'secheresse_moderee', 'secheresse_legere'].includes(climateRisk.drought_90d?.classification) 
-                                  ? 'text-red-600' 
-                                  : 'text-green-600'
-                              }`}>
-                                {climateRisk.drought_90d?.classification === 'secheresse_severe' && '🚨 Critique'}
-                                {climateRisk.drought_90d?.classification === 'secheresse_moderee' && '⚠️ Élevé'}
-                                {climateRisk.drought_90d?.classification === 'secheresse_legere' && '⚡ Modéré'}
-                                {climateRisk.drought_90d?.classification === 'normal' && '✅ Normal'}
-                                {climateRisk.drought_90d?.classification === 'excedentaire' && '💧 Excédentaire'}
-                                {climateRisk.drought_90d?.classification === 'inconnu' && '❓ N/A'}
-                              </span>
-                            </div>
+                          ))}
+                          <div className="p-4 rounded-lg border-2 bg-gray-50 border-gray-300">
+                            <p className="text-xs font-bold uppercase opacity-70">Lecture du risque</p>
+                            <p className="mt-2 text-sm text-gray-700">
+                              Le SPI compare le cumul récent à la pluviométrie historique de la même période. Plus sa valeur est négative, plus le risque de sécheresse est important.
+                            </p>
                           </div>
-                          {climateRisk.drought_30d?.classification !== 'normal' && climateRisk.drought_30d?.classification !== 'excedentaire' && climateRisk.drought_30d?.classification !== 'inconnu' && (
-                            <button
-                              onClick={() => handleCreateAutoAlert('drought')}
-                              disabled={creatingAutoAlert}
-                              className="mt-2 w-full px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs hover:bg-orange-700 disabled:opacity-50 flex items-center justify-center"
-                            >
-                              <Bell className="w-3 h-3 mr-1" />
-                              {creatingAutoAlert ? 'Création...' : 'Créer une alerte sécheresse'}
-                            </button>
-                          )}
                         </div>
-                      </div>
-                    ) : (
-                      <div className="text-center py-4 text-gray-400 text-sm">
-                        Données de tendance récente indisponibles
+                      ) : (
+                        <div className="text-center py-4 text-gray-400 text-sm">Données SPI observées indisponibles pour le moment</div>
+                      );
+                    })()}
+                    {(['30', '90'] as const).some((period) => ['secheresse_extreme', 'secheresse_severe', 'secheresse_moderee'].includes(climateRealtimeStatus?.spi_observe?.[period]?.alert)) && (
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          onClick={() => handleCreateAutoAlert('drought')}
+                          disabled={creatingAutoAlert}
+                          className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50 flex items-center"
+                        >
+                          <Bell className="w-4 h-4 mr-2" />
+                          {creatingAutoAlert ? 'Création...' : 'Créer une alerte sécheresse'}
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2772,6 +2713,51 @@ export default function AgricultureManagement() {
                     <span className="text-xs text-gray-500">Open-Meteo • ECMWF/GFS</span>
                   </div>
                   <div className="p-4">
+                    {(() => {
+                      const spi = climateRealtimeStatus?.spi_previsionnel;
+                      const getSpiLabel = (alert: string | undefined) => ({
+                        secheresse_extreme: 'Sécheresse extrême',
+                        secheresse_severe: 'Sécheresse sévère',
+                        secheresse_moderee: 'Sécheresse modérée',
+                        normal: 'Normal',
+                        humide: 'Humide',
+                        tres_humide: 'Très humide',
+                        inconnu: 'Indéterminé',
+                      } as Record<string, string>)[alert || 'inconnu'] || 'Indéterminé';
+                      const getSpiStyle = (alert: string | undefined) =>
+                        alert === 'secheresse_extreme' ? 'bg-red-100 border-red-500 text-red-800' :
+                        alert === 'secheresse_severe' ? 'bg-red-50 border-red-400 text-red-700' :
+                        alert === 'secheresse_moderee' ? 'bg-orange-100 border-orange-400 text-orange-800' :
+                        alert === 'normal' ? 'bg-green-100 border-green-400 text-green-800' :
+                        alert === 'humide' || alert === 'tres_humide' ? 'bg-blue-100 border-blue-400 text-blue-800' :
+                        'bg-gray-100 border-gray-300 text-gray-700';
+                      return (
+                        <div className={`mb-4 p-4 rounded-lg border-2 ${getSpiStyle(spi?.risk)}`}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-bold uppercase opacity-70">SPI prévisionnel 15 jours</p>
+                              <p className="text-2xl font-bold mt-1">{spi?.spi ?? 'N/A'}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold">{getSpiLabel(spi?.risk)}</p>
+                              <p className="text-xs mt-1 opacity-80">Cumul prévu : {spi?.forecast_total_mm ?? 'N/A'} mm</p>
+                            </div>
+                          </div>
+                          {spi?.risk && ['secheresse_extreme', 'secheresse_severe', 'secheresse_moderee'].includes(spi.risk) && (
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                onClick={() => handleCreateAutoAlert('drought')}
+                                disabled={creatingAutoAlert}
+                                className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs hover:bg-orange-700 disabled:opacity-50 flex items-center"
+                              >
+                                <Bell className="w-3 h-3 mr-1" />
+                                {creatingAutoAlert ? 'Création...' : 'Créer une alerte sécheresse'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {loadingForecast ? (
                       <div className="h-32 flex items-center justify-center">
                         <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
