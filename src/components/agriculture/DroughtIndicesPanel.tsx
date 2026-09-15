@@ -10,9 +10,12 @@ import {
   Sun, Droplet, Thermometer, Activity, Play,
 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
+import { useAuth } from '@/app/contexts/AuthContext';
 
 // URL du backend Django
-const API_BASE = 'http://127.0.0.1:8000/agriculture';
+const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL
+  ? `${process.env.NEXT_PUBLIC_DJANGO_API_URL}/agriculture`
+  : 'http://127.0.0.1:8000/agriculture';
 
 // Palette commune pour VCI / TCI / VHI / NCWSI (0-100, rouge → vert)
 const DROUGHT_PALETTE_GRADIENT =
@@ -51,6 +54,14 @@ function ZoomControl() {
 }
 
 export default function DroughtIndicesPanel() {
+  // Authentification Django : le token est obligatoire pour récupérer les champs
+  // appartenant à l'utilisateur connecté (le backend filtre par owner=user).
+  const { token, user } = useAuth();
+  const getAuthHeaders = useCallback(
+    () => (token ? { Authorization: `Token ${token}` } : {}),
+    [token]
+  );
+
   const [viewMode, setViewMode] = useState<'admin' | 'field'>('admin');
   const [zoneType, setZoneType] = useState<'region' | 'prefecture' | 'commune'>('region');
   const [zoneId, setZoneId] = useState<string>('');
@@ -110,16 +121,39 @@ export default function DroughtIndicesPanel() {
   }, []);
 
   const loadFields = useCallback(async () => {
+    // Le backend filtre les champs par owner=user ; sans token on obtient une 401.
+    if (!token) {
+      setAvailableFields([]);
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/api/champs/geojson/`);
+      const url = `${API_BASE}/api/champs/geojson/`;
+      console.log('[DroughtIndicesPanel] loadFields → GET', url, 'token:', token ? `${token.slice(0, 8)}…` : 'none');
+      const res = await fetch(url, {
+        credentials: 'include',
+        headers: { ...getAuthHeaders() },
+      });
+      console.log('[DroughtIndicesPanel] loadFields → status:', res.status);
+      if (res.status === 401) {
+        console.warn('[DroughtIndicesPanel] 401 — token invalide ou expiré');
+        setAvailableFields([]);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
-        setAvailableFields(data.features || []);
+        const features = data.features || [];
+        console.log('[DroughtIndicesPanel] loadFields → features reçus:', features.length, features.slice(0, 2));
+        setAvailableFields(features);
+      } else {
+        const text = await res.text().catch(() => '');
+        console.error('[DroughtIndicesPanel] loadFields → HTTP', res.status, text.slice(0, 200));
+        setAvailableFields([]);
       }
     } catch (e) {
-      console.error('Erreur chargement champs:', e);
+      console.error('[DroughtIndicesPanel] Erreur chargement champs:', e);
+      setAvailableFields([]);
     }
-  }, []);
+  }, [token, getAuthHeaders]);
 
   useEffect(() => {
     if (viewMode === 'admin') loadMapData(zoneType);
@@ -173,7 +207,8 @@ export default function DroughtIndicesPanel() {
 
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -447,38 +482,61 @@ export default function DroughtIndicesPanel() {
           ) : (
             <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
               <h4 className="font-medium text-gray-700 text-xs mb-2">Mes Parcelles</h4>
-              <div className="relative mb-2">
-                <input
-                  type="text"
-                  placeholder="Chercher par propriétaire..."
-                  value={fieldSearchTerm}
-                  onChange={(e) => setFieldSearchTerm(e.target.value)}
-                  className="pl-3 pr-3 py-1.5 border border-gray-200 rounded text-sm w-full focus:ring-1 focus:ring-green-500 focus:outline-none"
-                />
-              </div>
-              <select
-                value={selectedFieldId}
-                onChange={(e) => handleSelectField(e.target.value)}
-                className="w-full text-sm border-gray-300 rounded bg-white"
-              >
-                <option value="">-- Sélectionner un champ --</option>
-                {availableFields
-                  .filter((f: any) =>
-                    f.properties.proprietaire &&
-                    f.properties.proprietaire.toLowerCase().includes(fieldSearchTerm.toLowerCase())
-                  )
-                  .map((f: any) => (
-                    <option key={f.id} value={f.id}>
-                      {f.properties.nom} ({f.properties.proprietaire})
-                    </option>
-                  ))}
-              </select>
-              {selectedFieldId && selectedField && (
-                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mt-3">
-                  <p className="text-xs text-blue-800 font-semibold">Info Champ</p>
-                  <p className="text-xs text-blue-600 mt-1">Culture: {selectedField.properties.type_culture}</p>
-                  <p className="text-xs text-blue-600 mt-1">Propriétaire: {selectedField.properties.proprietaire}</p>
+              {!token ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                  Vous devez être connecté pour visualiser vos parcelles. Le backend Django
+                  filtre les champs par propriétaire : sans token d'authentification, aucun
+                  champ ne sera renvoyé.
                 </div>
+              ) : (
+                <>
+                  <div className="relative mb-2">
+                    <input
+                      type="text"
+                      placeholder="Chercher par propriétaire..."
+                      value={fieldSearchTerm}
+                      onChange={(e) => setFieldSearchTerm(e.target.value)}
+                      className="pl-3 pr-3 py-1.5 border border-gray-200 rounded text-sm w-full focus:ring-1 focus:ring-green-500 focus:outline-none"
+                    />
+                  </div>
+                  <select
+                    value={selectedFieldId}
+                    onChange={(e) => handleSelectField(e.target.value)}
+                    className="w-full text-sm border-gray-300 rounded bg-white"
+                  >
+                    <option value="">-- Sélectionner un champ --</option>
+                    {availableFields
+                      .filter((f: any) => {
+                        // On accepte tous les champs, y compris ceux dont
+                        // `proprietaire` est vide/null. La recherche par
+                        // propriétaire reste fonctionnelle via une comparaison
+                        // sûre (chaîne vide si la valeur est absente).
+                        const owner = (f.properties?.proprietaire || '').toLowerCase();
+                        const nom = (f.properties?.nom || '').toLowerCase();
+                        const term = fieldSearchTerm.trim().toLowerCase();
+                        if (!term) return true; // Aucun filtre → on affiche tout
+                        return owner.includes(term) || nom.includes(term);
+                      })
+                      .map((f: any) => (
+                        <option key={f.id} value={f.id}>
+                          {f.properties.nom || `Champ #${f.id}`}
+                          {f.properties.proprietaire ? ` (${f.properties.proprietaire})` : ''}
+                        </option>
+                      ))}
+                  </select>
+                  {availableFields.length === 0 && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Aucun champ enregistré pour votre compte.
+                    </p>
+                  )}
+                  {selectedFieldId && selectedField && (
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mt-3">
+                      <p className="text-xs text-blue-800 font-semibold">Info Champ</p>
+                      <p className="text-xs text-blue-600 mt-1">Culture: {selectedField.properties.type_culture}</p>
+                      <p className="text-xs text-blue-600 mt-1">Propriétaire: {selectedField.properties.proprietaire}</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
