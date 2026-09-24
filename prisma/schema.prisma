@@ -375,6 +375,7 @@ model Cantons {
 
 // Communes
 model Commune {
+  id String @id @default(cuid())
   commune    String
   code_commu Int
   region     String
@@ -385,6 +386,7 @@ model Commune {
 
   @@map("bl2")
 }
+
 
 // Routes
 model Routes {
@@ -400,6 +402,7 @@ model Routes {
 
 // Marchés
 model Marche {
+  id String @id @default(cuid())
   canton_nom String
   nom_locali String
   marche_nom String
@@ -409,8 +412,10 @@ model Marche {
   @@map("marches")
 }
 
+
 // Jardins d'enfants
 model Jardin {
+  id String @id @default(cuid())
   canton_nom  String
   nom_locali  String
   etablissem  String
@@ -425,8 +430,10 @@ model Jardin {
   @@map("jardb2")
 }
 
+
 // Collèges
 model College {
+  id String @id @default(cuid())
   canton_nom  String
   nom_locali  String
   etablissem  String
@@ -441,8 +448,10 @@ model College {
   @@map("collegeb2")
 }
 
+
 // Lycées
 model Lycee {
+  id String @id @default(cuid())
   canton_nom  String
   nom_locali  String
   etablissem  String
@@ -457,8 +466,10 @@ model Lycee {
   @@map("lyc2")
 }
 
+
 // PEA
 model Pea {
+  id String @id @default(cuid())
   canton_nom   String
   nom_locali   String
   forage_nom   String
@@ -469,8 +480,10 @@ model Pea {
   @@map("pea")
 }
 
+
 // Borne fontaines
 model BorneFontaine {
+  id String @id @default(cuid())
   canton_nom String
   borne_font String
   geom       String
@@ -478,8 +491,10 @@ model BorneFontaine {
   @@map("bornefontaines")
 }
 
+
 // Châteaux
 model Chateau {
+  id String @id @default(cuid())
   canton_nom String
   nom_locali String
   chateau_no String
@@ -489,8 +504,10 @@ model Chateau {
   @@map("chatea")
 }
 
+
 // Hôpitaux / Formations sanitaires
 model Hopitale {
+  id String @id @default(cuid())
   canton_nom String
   nom_locali String
   nom_fs     String
@@ -502,8 +519,10 @@ model Hopitale {
   @@map("formation_s")
 }
 
+
 // Terrains / stades
 model Terrain {
+  id String @id @default(cuid())
   canton_nom String
   nom_locali String
   terrain    String
@@ -513,8 +532,10 @@ model Terrain {
   @@map("stade_terrainbl2")
 }
 
+
 // Coopératives
 model Cooperative {
+  id String @id @default(cuid())
   canton_nom  String
   nom_locali  String
   cooperativ  String
@@ -524,8 +545,10 @@ model Cooperative {
   @@map("cooperativebl2")
 }
 
+
 // Magasins / intrants
 model MagasinBl2 {
+  id String @id @default(cuid())
   canton_nom String
   etab_nom   String
   ouverture  String
@@ -534,3 +557,4 @@ model MagasinBl2 {
 
   @@map("magazin_intrantbl2")
 }
+
