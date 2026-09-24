@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { AlertTriangle, TrendingUp, Map, Building, Droplets, ThermometerSun, Waves, Home as HomeIcon, Users, Activity, Zap, TreePine, Trophy, Bell, Menu, X, Search, Filter, ChevronRight, MapPin, AlertCircle, CheckCircle, Settings } from 'lucide-react'
-import GeoPortal from '@/components/geoportal/GeoPortal'
+const GeoPortal = dynamic(() => import('@/components/geoportal/GeoPortal'), { ssr: false })
 import CommunalManagement from '@/components/communal/CommunalManagement'
 import InfrastructureManagement from '@/components/infrastructure/InfrastructureManagement'
 import AgricultureManagement from '@/components/agriculture/AgricultureManagement'
